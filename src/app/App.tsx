@@ -1,4 +1,6 @@
-import { supabase } from '../supabaseClient' // (o kung nasaan ang path ng supabaseClient.ts)
+import React, { useMemo } from 'react';
+import { LocationMap } from './components/LocationMap';
+//import { supabase } from '../supabaseClient' // (o kung nasaan ang path ng supabaseClient.ts)
 import { useState, useRef, useEffect } from "react";
 import { AppProvider, useApp, type Program, type Session, type Notification, type AttendanceRecord, type AssessorEvaluation } from "./appContext";
 import { motion, AnimatePresence } from "motion/react";
@@ -13,6 +15,7 @@ import {
   Send, Info, Check, X, Lock, LogOut, Key, Settings, ShieldCheck,
   UserPlus, UserX, RefreshCw, ToggleLeft, ToggleRight, Hash, Globe,
   ClipboardList, Star, Award, Sun, Moon, Phone, Briefcase, MapPinned, ArrowRight,
+  CheckCircle2,
   Facebook, Twitter, Youtube, Instagram,
 } from "lucide-react";
 import {
@@ -20,7 +23,6 @@ import {
   ResponsiveContainer, LineChart, Line, RadarChart, PolarGrid,
   PolarAngleAxis, Radar, AreaChart, Area,
 } from "recharts";
-
 const fadeUp = {
   hidden: { opacity: 0, y: 18 },
   show: (i = 0) => ({ opacity: 1, y: 0, transition: { duration: 0.35, delay: i * 0.07 } }),
@@ -1094,80 +1096,93 @@ function LandingPage({ onLogin }: { onLogin: () => void }) {
       </section>
 
       {/* FOOTER */}
-      <footer className={`border-t pt-16 pb-8 transition-colors duration-300 ${dark ? "border-white/10" : "border-slate-200"}`}>
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_1fr_1fr] gap-10 lg:gap-8">
-            {/* Brand column */}
-            <div>
-              <div className={`inline-flex items-center gap-3 rounded-xl border px-4 py-3 mb-6 ${dark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
-                <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-white"><img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" /></div>
-                <div className="leading-tight">
-                  <div className={`text-sm font-semibold ${dark ? "text-white" : "text-slate-900"}`}>Barangay Culiat Government</div>
-                  <div className={`text-xs ${dark ? "text-white/40" : "text-slate-500"}`}>Barangay Local Government Unit</div>
-                </div>
-              </div>
-              <p className={`text-sm leading-relaxed max-w-sm ${dark ? "text-white/40" : "text-slate-500"}`}>
-                The Barangay Culiat Integrated Public Safety & Security System is an official platform of the Barangay Culiat Government, dedicated to delivering transparent, efficient, and technology-driven public safety services to all 15,000+ residents.
-              </p>
-              <div className="flex items-center gap-2 mt-5">
-                {[Facebook, Twitter, Youtube, Instagram].map((Icon, i) => (
-                  <button key={i} className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors ${dark ? "border-white/10 bg-white/[0.03] text-white/50 hover:text-white hover:border-white/20" : "border-slate-200 bg-slate-50 text-slate-500 hover:text-slate-900 hover:border-slate-300"}`}>
-                    <Icon size={14} />
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Emergency Hotlines */}
-            <div>
-              <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>Emergency Hotlines</div>
-              <div className="space-y-4">
-                {[
-                  { label: "National Emergency", value: "911" },
-                  { label: "Barangay Helpline", value: "122" },
-                  { label: "Fire Department", value: "8426-0246" },
-                  { label: "Police District", value: "117" },
-                ].map(h => (
-                  <div key={h.label}>
-                    <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-500 mb-0.5">{h.label}</div>
-                    <div className={`text-lg font-semibold ${dark ? "text-white" : "text-slate-900"}`}>{h.value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Quick Links */}
-            <div>
-              <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>Quick Links</div>
-              <div className="flex flex-col gap-3">
-                {navLinks.map(l => (
-                  <button key={l.id} onClick={() => scrollTo(l.id)} className={`text-left text-sm transition-colors ${dark ? "text-white/50 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{l.label}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Transparency */}
-            <div>
-              <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>Transparency</div>
-              <div className="flex flex-col gap-3">
-                {["Freedom of Information", "Annual Reports", "Budget Disclosure", "PhilSys Integration", "Privacy Policy", "Terms of Use"].map(t => (
-                  <button key={t} className={`text-left text-sm transition-colors ${dark ? "text-white/50 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{t}</button>
-                ))}
-              </div>
-            </div>
+<footer className={`border-t pt-16 pb-8 transition-colors duration-300 ${dark ? "border-white/10" : "border-slate-200"}`}>
+  <div className="max-w-[88rem] mx-auto px-6">
+    {/* Updated to a 12-column grid layout */}
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 lg:gap-8">
+      
+      {/* 1. Brand column (3 cols) */}
+      <div className="lg:col-span-3">
+        <div className={`inline-flex items-center gap-3 rounded-xl border px-4 py-3 mb-6 ${dark ? "border-white/10 bg-white/[0.03]" : "border-slate-200 bg-slate-50"}`}>
+          <div className="w-9 h-9 rounded-full overflow-hidden flex-shrink-0 bg-white">
+            <img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" />
           </div>
-
-          {/* Bottom bar */}
-          <div className={`mt-14 pt-6 border-t flex flex-col sm:flex-row items-center justify-between gap-3 ${dark ? "border-white/10" : "border-slate-200"}`}>
-            <span className={`text-xs ${dark ? "text-white/40" : "text-slate-500"}`}>© 2026 Barangay Culiat Government · All rights reserved · Official Barangay Website</span>
-            <div className="flex items-center gap-5">
-              {["Privacy Policy", "Accessibility", "Sitemap"].map(l => (
-                <button key={l} className={`text-xs transition-colors ${dark ? "text-white/40 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{l}</button>
-              ))}
-            </div>
+          <div className="leading-tight">
+            <div className={`text-sm font-semibold ${dark ? "text-white" : "text-slate-900"}`}>Barangay Culiat Government</div>
+            <div className={`text-xs ${dark ? "text-white/40" : "text-slate-500"}`}>Barangay Local Government Unit</div>
           </div>
         </div>
-      </footer>
+        <p className={`text-sm leading-relaxed ${dark ? "text-white/40" : "text-slate-500"}`}>
+          The Barangay Culiat Integrated Public Safety & Security System is an official platform dedicated to delivering transparent, efficient, and technology-driven public safety services.
+        </p>
+        <div className="flex items-center gap-2 mt-5">
+          {[Facebook, Twitter, Youtube, Instagram].map((Icon, i) => (
+            <button key={i} className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-colors ${dark ? "border-white/10 bg-white/[0.03] text-white/50 hover:text-white hover:border-white/20" : "border-slate-200 bg-slate-50 text-slate-500 hover:text-slate-900 hover:border-slate-300"}`}>
+              <Icon size={14} />
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 2. Emergency Hotlines (2 cols) */}
+      <div className="lg:col-span-2">
+        <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>Emergency Hotlines</div>
+        <div className="space-y-4">
+          {[
+            { label: "National Emergency", value: "911" },
+            { label: "Barangay Helpline", value: "122" },
+            { label: "Fire Department", value: "8426-0246" },
+            { label: "Police District", value: "117" },
+          ].map(h => (
+            <div key={h.label}>
+              <div className="text-[10px] font-mono uppercase tracking-widest text-emerald-500 mb-0.5">{h.label}</div>
+              <div className={`text-lg font-semibold ${dark ? "text-white" : "text-slate-900"}`}>{h.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 3. Quick Links (2 cols) */}
+      <div className="lg:col-span-2">
+        <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>Quick Links</div>
+        <div className="flex flex-col gap-3">
+          {navLinks.map(l => (
+            <button key={l.id} onClick={() => scrollTo(l.id)} className={`text-left text-sm transition-colors ${dark ? "text-white/50 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{l.label}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* 4. Transparency (2 cols) */}
+      <div className="lg:col-span-2">
+        <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>Transparency</div>
+        <div className="flex flex-col gap-3">
+          {["Freedom of Information", "Annual Reports", "Budget Disclosure", "PhilSys Integration", "Privacy Policy", "Terms of Use"].map(t => (
+            <button key={t} className={`text-left text-sm transition-colors ${dark ? "text-white/50 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{t}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* 5. Location Map Column (3 cols) */}
+      <div className="lg:col-span-3">
+        <div className={`text-[11px] font-mono font-bold uppercase tracking-widest mb-5 ${dark ? "text-white/70" : "text-slate-700"}`}>
+          Our Location
+        </div>
+        <LocationMap />
+      </div>
+
+    </div>
+
+    {/* Bottom bar */}
+    <div className={`mt-14 pt-6 border-t flex flex-col sm:flex-row items-center justify-between gap-3 ${dark ? "border-white/10" : "border-slate-200"}`}>
+      <span className={`text-xs ${dark ? "text-white/40" : "text-slate-500"}`}>© 2026 Barangay Culiat Government · All rights reserved · Official Barangay Website</span>
+      <div className="flex items-center gap-5">
+        {["Privacy Policy", "Accessibility", "Sitemap"].map(l => (
+          <button key={l} className={`text-xs transition-colors ${dark ? "text-white/40 hover:text-white" : "text-slate-500 hover:text-slate-900"}`}>{l}</button>
+        ))}
+      </div>
+    </div>
+  </div>
+</footer>
     </div>
   );
 }
@@ -1950,6 +1965,7 @@ function AdminDashboard() {
 }
 
 const DISASTER_TYPES = ["Earthquake", "Flood / Storm Surge", "Wildfire", "Typhoon", "Hazmat Spill", "Multi-Hazard Cascade"];
+//const DISASTER_TYPES = ["Earthquake", "Flood / Storm Surge", "Wildfire", "Typhoon"];
 
 const DISASTER_MODULE_TOPICS: Record<string, { title: string; duration: string }[]> = {
   "Earthquake": [
@@ -3004,79 +3020,487 @@ function TrainingModule() {
   );
 }
 
-function SimModule() {
-  const [tab, setTab] = useState<SimTab>("selector");
-  const [showLaunchDialog, setShowLaunchDialog] = useState(false);
+import {
+   Copy, Printer, RotateCcw,  
+} from "lucide-react";
+
+// Narrative Story Generator Engine
+const createScenarioStory = (disaster: any, config: any, injects: any[], roles: any[]) => {
+  const storyTemplates: Record<string, any> = {
+    EQ: {
+      title: "Operation Earthquake: Epicenter Shaking",
+      background: `A powerful earthquake with an estimated magnitude of 7.2 suddenly struck the area covering ${config.affectedArea} km² at around 9:00 AM. Due to intense shaking, several older structures suffered severe cracks and structural failures. Grid power failed across the sector while widespread panic broke out.`,
+      objective: "Rapidly assess facility structural integrity, safely evacuate personnel within 15 minutes, and administer triage and first aid to casualties.",
+      defaultEvac: "Open Ground Athletic Field (Zone A)",
+      hazardDetails: "Collapsing debris, aftershocks, power outages, and secondary fire hazards."
+    },
+    FL: {
+      title: "Operation Deluge: Severe Torrential Flood",
+      background: `Continuous heavy rainfall from a Super Typhoon caused floodwaters to rise rapidly across ${config.affectedArea} km². Waters have reached the second floor of several facilities with strong currents carrying submerged debris. Moving outdoors without floating gear poses extreme hazard.`,
+      objective: "Execute vertical evacuation to higher floors, deploy rescue boats, and ensure no personnel remain in ground-level risk zones.",
+      defaultEvac: "3rd Floor Assembly Deck & Elevated Gymnasium",
+      hazardDetails: "Rapidly rising floodwaters, electrocution risks from submerged power lines, and hypothermia."
+    },
+    FR: {
+      title: "Operation Blaze: Industrial Fire Outbreak",
+      background: `A major fire broke out in the eastern wing of the facility following an electrical short circuit. Driven by strong winds and combustible materials, flames and thick smoke rapidly spread across ${config.affectedArea} km². Primary evacuation corridors are obstructed and visibility is severely degraded.`,
+      objective: "Isolate the fire source, guide evacuees to the upwind area (against wind direction), and triage inhalation injuries.",
+      defaultEvac: "East Parking Open Area (Upwind Evacuation Zone)",
+      hazardDetails: "Thick toxic smoke, extreme heat exposure, and structural collapse of burning facilities."
+    },
+    TY: {
+      title: "Operation Tempest: Typhoon Onslaught",
+      background: `The area is under Signal No. 4. Wind gusts exceeding 200 km/h have blown off roofing, uprooted trees, and downed utility poles. The surrounding ${config.affectedArea} km² sector has lost all landline communications and grid power.`,
+      objective: "Remain in fortified shelters, manage emergency backup power, and prepare medical teams to treat victims struck by airborne debris.",
+      defaultEvac: "Reinforced Concrete Evacuation Center (Building C)",
+      hazardDetails: "Airborne debris, structural damage, and total loss of communication infrastructure."
+    },
+    HZ: {
+      title: "Operation Spill: Hazmat Alert Phase 3",
+      background: `An accident in the chemical storage building caused a major leak of highly toxic chemical gas. Dangerous fumes are currently drifting windward toward nearby facilities within ${config.affectedArea} km². Individuals in close proximity are experiencing dizziness and severe respiratory distress.`,
+      objective: "Contain the chemical spill using Hazmat equipment, enforce an immediate 500-meter radius evacuation zone, and set up a Decontamination Station.",
+      defaultEvac: "Safe Zone Delta (500-Meter Upwind Assembly Point)",
+      hazardDetails: "Chemical poisoning, asphyxiation, and environmental contamination."
+    },
+    MH: {
+      title: "Operation Crisis: Multi-Hazard Cascade",
+      background: `Following a major earthquake, a simultaneous structural fire and gas leak broke out in the primary facility. The surrounding ${config.affectedArea} km² area is under full crisis status. Multiple emergency events are unfolding concurrently while first responder resources are stretched thin.`,
+      objective: "Establish Unified Command, prioritize rescue operations based on life-threat severity, and evacuate all personnel to safety.",
+      defaultEvac: "Central Regional Disaster Staging Area",
+      hazardDetails: "Simultaneous earthquake, fire outbreak, gas leak, and responder shortages."
+    }
+  };
+
+  const base = storyTemplates[disaster.id] || storyTemplates["EQ"];
+
+  return {
+    title: base.title,
+    disasterType: disaster.name,
+    severity: disaster.severity,
+    backgroundStory: base.background,
+    objective: base.objective,
+    hazardDetails: base.hazardDetails,
+    duration: config.duration,
+    affectedArea: `${config.affectedArea} km²`,
+    estCasualties: config.casualties,
+    responseLevel: config.responseLevel,
+    evacuationArea: config.customEvacArea || base.defaultEvac,
+    injectEvents: injects,
+    assignedRoles: roles.filter(r => r.count > 0)
+  };
+};
+
+export function SimModule() {
+  const [tab, setTab] = useState<"selector" | "injector" | "roles" | "script">("selector");
+  const [generatedStory, setGeneratedStory] = useState<any>(null);
+  const [copied, setCopied] = useState(false);
+
   const templates = [
     { id: "EQ", name: "Earthquake", icon: Zap, severity: "Extreme", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
     { id: "FL", name: "Flood / Storm Surge", icon: Droplets, severity: "High", color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20" },
-    { id: "FR", name: "Wildfire", icon: Flame, severity: "High", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20" },
+    { id: "FR", name: "Wildfire / Industrial Fire", icon: Flame, severity: "High", color: "text-red-400", bg: "bg-red-400/10", border: "border-red-400/20" },
     { id: "TY", name: "Typhoon", icon: Wind, severity: "Extreme", color: "text-cyan-400", bg: "bg-cyan-400/10", border: "border-cyan-400/20" },
     { id: "HZ", name: "Hazmat Spill", icon: Shield, severity: "Critical", color: "text-yellow-400", bg: "bg-yellow-400/10", border: "border-yellow-400/20" },
     { id: "MH", name: "Multi-Hazard Cascade", icon: Layers, severity: "Extreme", color: "text-purple-400", bg: "bg-purple-400/10", border: "border-purple-400/20" },
   ];
-  const app = useApp();
+
   const [sel, setSel] = useState(templates[0]);
-  const injects = [
-    { time: "T+05:00", event: "Power grid fails — backup generators activated", type: "complication" as const },
-    { time: "T+12:00", event: "Main exit blocked by structural debris", type: "complication" as const },
-    { time: "T+18:00", event: "Additional medical team arrives", type: "resource" as const },
-    { time: "T+25:00", event: "Secondary gas leak — expand exclusion zone", type: "decision" as const },
-    { time: "T+40:00", event: "Communications tower down — radio only", type: "complication" as const },
-  ];
-  const roles = [
-    { name: "Incident Commander", abbr: "IC", count: 1 },
+
+  const [config, setConfig] = useState({
+    duration: "2 hours",
+    affectedArea: "12.5",
+    casualties: "45 casualties (10 critical, 35 minor injuries)",
+    responseLevel: "Level 2 (Local & Regional Responders)",
+    customEvacArea: ""
+  });
+
+  const [injects, setInjects] = useState([
+    { time: "T+05:00", event: "Main building grid power fails — backup generators engage.", type: "Complication" },
+    { time: "T+12:00", event: "Fallen structural debris blocks primary Evacuation Exit A.", type: "Complication" },
+    { time: "T+18:00", event: "Additional Medical Team from the Red Cross arrives on scene.", type: "Resource" },
+    { time: "T+25:00", event: "Secondary gas leak detected — expand exclusion zone perimeter.", type: "Decision Point" },
+    { time: "T+40:00", event: "Radio and cellular tower signals drop — switch to analog handheld radios.", type: "Complication" },
+  ]);
+
+  const [roles, setRoles] = useState([
+    { name: "Incident Commander (IC)", abbr: "IC", count: 1 },
     { name: "Operations Section Chief", abbr: "OPS", count: 2 },
-    { name: "First Responder", abbr: "FR", count: 8 },
-    { name: "Medical Officer", abbr: "MED", count: 4 },
-    { name: "Communications Officer", abbr: "COMM", count: 2 },
-    { name: "Evacuee (Observer)", abbr: "EVA", count: 12 },
-  ];
-  const injectColors = { complication: "border-red-400/30 bg-red-400/5 text-red-400", resource: "border-green-400/30 bg-green-400/5 text-green-400", decision: "border-yellow-400/30 bg-yellow-400/5 text-yellow-400" };
+    { name: "First Responder / Rescue Team", abbr: "FR", count: 8 },
+    { name: "Medical / Triage Officer", abbr: "MED", count: 4 },
+    { name: "Safety & Communications Officer", abbr: "COMM", count: 2 },
+    { name: "Evacuees & Victims (Roleplay Actors)", abbr: "ACT", count: 15 },
+  ]);
+
+  // Generate story script and automatically switch tab
+  const handleGenerateStory = () => {
+    const story = createScenarioStory(sel, config, injects, roles);
+    setGeneratedStory(story);
+    setTab("script");
+  };
+
+  const copyToClipboard = () => {
+    if (!generatedStory) return;
+    const text = `
+=== ${generatedStory.title} ===
+Disaster Type: ${generatedStory.disasterType} (${generatedStory.severity})
+Duration: ${generatedStory.duration} | Affected Area: ${generatedStory.affectedArea}
+
+[SCENARIO STORY & SITUATION]
+${generatedStory.backgroundStory}
+
+[DRILL OBJECTIVE]
+${generatedStory.objective}
+
+[PRIMARY EVACUATION AREA]
+${generatedStory.evacuationArea}
+
+[ESTIMATED CASUALTIES]
+${generatedStory.estCasualties}
+
+[EVENT TIMELINE & INJECTS]
+${generatedStory.injectEvents.map((i: any) => `- ${i.time}: ${i.event} (${i.type})`).join("\n")}
+
+[ASSIGNED PERSONNEL ROLES]
+${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personnel`).join("\n")}
+    `;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
-    <div className="space-y-5">
-      {showLaunchDialog && (
-        <LaunchScenarioModal
-          scenario={sel}
-          onConfirm={() => {
-            const session = { id: "", course: sel.name, date: new Date().toLocaleDateString(), time: "TBD", location: "Live", trainer: "Automated", enrolled: 0, capacity: 100 };
-            const id = app.createSession(session);
-            app.launchSession(id);
-            app.addNotification({ type: "Simulation", subject: `Launched: ${sel.name}`, status: "Sent" });
-            setShowLaunchDialog(false);
-          }}
-          onCancel={() => setShowLaunchDialog(false)}
-        />
-      )}
+    <div className="space-y-5 text-foreground bg-background p-6 rounded-xl border border-border">
+      
+      {/* Top Header */}
       <div className="flex items-center justify-between">
-        <div><h1 className="text-4xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">SIMULATION SCENARIO BUILDER</h1><p className="text-muted-foreground text-base mt-0.5">Disaster type · variable injector · role configuration</p></div>
-        <button onClick={() => setShowLaunchDialog(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-base font-semibold hover:bg-primary/90"><Play size={16} />Launch Scenario</button>
+        <div>
+          <h1 className="text-4xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">
+            SIMULATION SCENARIO BUILDER
+          </h1>
+          <p className="text-muted-foreground text-sm mt-0.5">Disaster type · variable injector · role configuration · script generator</p>
+        </div>
+
+        <button 
+          onClick={handleGenerateStory} 
+          className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-md text-sm font-bold hover:bg-primary/90 shadow-md transition-all"
+        >
+          <Play size={15} /> Generate
+        </button>
       </div>
-      <TabBar tabs={[{ id: "selector", label: "Disaster Type Selector", icon: Target }, { id: "injector", label: "Variable Injector", icon: Sliders }, { id: "roles", label: "Role Configuration", icon: Users }]} active={tab} onChange={v => setTab(v as SimTab)} />
+
+      {/* Module Navigation Tabs */}
+      <div className="flex bg-muted/30 p-1 rounded-lg border border-border gap-1 w-fit">
+        {[
+          { id: "selector", label: "Disaster Type Selector", icon: Target },
+          { id: "injector", label: "Variable Injector", icon: Sliders },
+          { id: "roles", label: "Role Configuration", icon: Users },
+          { 
+            id: "script", 
+            label: generatedStory ? "📜 Active Drill Script" : "📜 Drill Script Preview", 
+            icon: BookOpen,
+            highlight: !!generatedStory
+          },
+        ].map(t => {
+          const Icon = t.icon;
+          const active = tab === t.id;
+          return (
+            <button 
+              key={t.id} 
+              onClick={() => setTab(t.id as any)}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                active 
+                  ? "bg-card text-foreground shadow-sm border border-border" 
+                  : t.highlight 
+                    ? "text-primary hover:text-primary font-bold" 
+                    : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Icon size={14} /> {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* TAB 1: DISASTER SELECTOR */}
       {tab === "selector" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">{templates.map(t => { const Icon = t.icon; const active = sel.id === t.id; return (<button key={t.id} onClick={() => setSel(t)} className={`text-left p-3 rounded-lg border transition-all ${active ? `${t.border} ${t.bg}` : "border-border bg-card hover:border-border/80"}`}><div className="flex items-center gap-2 mb-1"><Icon size={16} className={active ? t.color : "text-muted-foreground"} /><span className="text-xs font-semibold text-foreground">{t.name}</span>{active && <Check size={13} className="text-primary ml-auto" />}</div><Badge status={t.severity}>{t.severity}</Badge></button>); })}</div>
-          <div className="bg-card border border-border rounded-lg p-4">
-            <div className="text-sm font-semibold text-foreground mb-3">Configure: {sel.name}</div>
-            <div className="grid grid-cols-4 gap-3">{["Simulation Duration", "Affected Area (km²)", "Est. Casualties", "Response Level"].map(f => (<div key={f}><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">{f}</label><input defaultValue={f.includes("Duration") ? "4 hours" : f.includes("Area") ? "12.5" : f.includes("Cas") ? "45" : "Level 2"} className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>))}</div>
+          <div className="grid grid-cols-3 gap-3">
+            {templates.map(t => {
+              const Icon = t.icon;
+              const active = sel.id === t.id;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setSel(t)}
+                  className={`text-left p-3 rounded-lg border transition-all ${
+                    active ? `${t.border} ${t.bg}` : "border-border bg-card hover:border-border/80"
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Icon size={16} className={active ? t.color : "text-muted-foreground"} />
+                    <span className="text-xs font-semibold text-foreground">{t.name}</span>
+                  </div>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ${t.color}`}>
+                    {t.severity}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="bg-card border border-border rounded-lg p-4 space-y-4">
+            <div className="text-sm font-semibold text-foreground">Configure Scenario Parameters: {sel.name}</div>
+            
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Drill Duration</label>
+                <input 
+                  value={config.duration} 
+                  onChange={(e) => setConfig({ ...config, duration: e.target.value })}
+                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" 
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Affected Area (km²)</label>
+                <input 
+                  value={config.affectedArea} 
+                  onChange={(e) => setConfig({ ...config, affectedArea: e.target.value })}
+                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" 
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Est. Casualties</label>
+                <input 
+                  value={config.casualties} 
+                  onChange={(e) => setConfig({ ...config, casualties: e.target.value })}
+                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" 
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Response Level</label>
+                <input 
+                  value={config.responseLevel} 
+                  onChange={(e) => setConfig({ ...config, responseLevel: e.target.value })}
+                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" 
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">
+                Custom Evacuation Area (Optional)
+              </label>
+              <input 
+                placeholder="Example: Grand Plaza Grounds / North Gym"
+                value={config.customEvacArea} 
+                onChange={(e) => setConfig({ ...config, customEvacArea: e.target.value })}
+                className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" 
+              />
+            </div>
           </div>
         </div>
       )}
+
+      {/* TAB 2: INJECTOR */}
       {tab === "injector" && (
         <div className="space-y-3">
           {injects.map((inj, idx) => (
-            <div key={idx} className={`flex items-start gap-3 p-3 rounded-lg border ${injectColors[inj.type]}`}>
-              <span className="text-[12px] font-mono font-bold mt-0.5">{inj.time}</span>
+            <div key={idx} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card">
+              <span className="text-xs font-mono font-bold text-primary">{inj.time}</span>
               <span className="flex-1 text-xs text-foreground">{inj.event}</span>
-              <span className={`text-[12px] font-mono capitalize ${injectColors[inj.type].split(" ")[2]}`}>{inj.type}</span>
+              <span className="text-[10px] font-mono uppercase bg-muted px-2 py-0.5 rounded text-muted-foreground">{inj.type}</span>
             </div>
           ))}
-          <button className="w-full flex items-center justify-center gap-2 border border-dashed border-border rounded-lg p-3 text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"><PlusCircle size={14} />Add Inject</button>
         </div>
       )}
+
+      {/* TAB 3: ROLES */}
       {tab === "roles" && (
-        <div className="grid grid-cols-2 gap-3">{roles.map(r => (<div key={r.name} className="bg-card border border-border rounded-lg p-3 flex items-center gap-3"><span className="text-xs font-mono font-bold text-primary border border-primary/30 bg-primary/10 px-2 py-1 rounded">{r.abbr}</span><div className="flex-1"><div className="text-xs font-semibold text-foreground">{r.name}</div></div><div className="flex items-center gap-1"><button className="w-5 h-5 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground">−</button><span className="text-xs font-mono text-foreground w-5 text-center">{r.count}</span><button className="w-5 h-5 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground">+</button></div></div>))}</div>
+        <div className="grid grid-cols-2 gap-3">
+          {roles.map((r, idx) => (
+            <div key={r.name} className="bg-card border border-border rounded-lg p-3 flex items-center justify-between">
+              <span className="text-xs font-semibold text-foreground">{r.name}</span>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => {
+                    const updated = [...roles];
+                    if (updated[idx].count > 0) updated[idx].count--;
+                    setRoles(updated);
+                  }}
+                  className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                >
+                  −
+                </button>
+                <span className="text-xs font-mono text-foreground w-6 text-center">{r.count}</span>
+                <button 
+                  onClick={() => {
+                    const updated = [...roles];
+                    updated[idx].count++;
+                    setRoles(updated);
+                  }}
+                  className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground hover:text-foreground"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
       )}
+
+      {/* TAB 4: GENERATED DRILL SCRIPT */}
+      {tab === "script" && (
+        <div className="space-y-5">
+          {!generatedStory ? (
+            <div className="bg-card border border-dashed border-border rounded-xl p-12 text-center space-y-3">
+              <AlertTriangle className="mx-auto text-amber-400" size={32} />
+              <h3 className="text-lg font-bold text-foreground">No Drill Script Generated Yet</h3>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                Click the **"Launch & Generate Drill Story"** button above to compile a narrative script based on your selected settings.
+              </p>
+              <button 
+                onClick={handleGenerateStory}
+                className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-xs font-bold hover:bg-primary/90"
+              >
+                Generate Script Now
+              </button>
+            </div>
+          ) : (
+            <div className="bg-card border border-border rounded-xl p-6 space-y-6 shadow-sm">
+              
+              {/* Script Title Banner */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border pb-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-mono uppercase bg-primary/20 text-primary px-2 py-0.5 rounded font-bold">
+                      {generatedStory.severity} SEVERITY DRILL
+                    </span>
+                    <span className="text-xs font-mono text-muted-foreground">• {generatedStory.disasterType}</span>
+                  </div>
+                  <h2 className="text-3xl font-bold font-['Barlow_Condensed'] text-foreground tracking-wide">
+                    {generatedStory.title}
+                  </h2>
+                </div>
+
+                {/* Actions Inside Script View */}
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={copyToClipboard}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border rounded text-xs font-medium hover:bg-muted/80 text-foreground"
+                  >
+                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                    {copied ? "Copied!" : "Copy Script"}
+                  </button>
+
+                  <button 
+                    onClick={() => window.print()}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs font-bold hover:bg-primary/90"
+                  >
+                    <Printer size={14} /> Print Script
+                  </button>
+                </div>
+              </div>
+
+              {/* Story Background / Narrative */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-mono uppercase tracking-wider text-primary font-bold">
+                  📖 Scenario Background & Story
+                </h3>
+                <p className="p-4 bg-muted/20 border border-border rounded-lg text-sm leading-relaxed text-foreground/90 italic">
+                  "{generatedStory.backgroundStory}"
+                </p>
+              </div>
+
+              {/* Objectives & Evacuation Area */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">🎯 Drill Objective</h4>
+                  <div className="p-3.5 bg-muted/10 border border-border rounded-md text-xs leading-relaxed text-foreground">
+                    {generatedStory.objective}
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <h4 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">📍 Evacuation Area</h4>
+                  <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-semibold text-xs rounded-md">
+                    {generatedStory.evacuationArea}
+                  </div>
+                </div>
+              </div>
+
+              {/* Scenario Specs Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                <div className="bg-muted/20 border border-border p-3 rounded-lg">
+                  <span className="text-[10px] font-mono text-muted-foreground block uppercase">Est. Casualties</span>
+                  <span className="font-semibold text-red-400">{generatedStory.estCasualties}</span>
+                </div>
+                <div className="bg-muted/20 border border-border p-3 rounded-lg">
+                  <span className="text-[10px] font-mono text-muted-foreground block uppercase">Drill Duration</span>
+                  <span className="font-semibold">{generatedStory.duration}</span>
+                </div>
+                <div className="bg-muted/20 border border-border p-3 rounded-lg">
+                  <span className="text-[10px] font-mono text-muted-foreground block uppercase">Affected Area</span>
+                  <span className="font-semibold">{generatedStory.affectedArea}</span>
+                </div>
+                <div className="bg-muted/20 border border-border p-3 rounded-lg">
+                  <span className="text-[10px] font-mono text-muted-foreground block uppercase">Primary Hazards</span>
+                  <span className="font-semibold text-amber-400">{generatedStory.hazardDetails}</span>
+                </div>
+              </div>
+
+              {/* Timeline Injects */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-mono uppercase tracking-wider text-primary font-bold">
+                  ⏱️ Event Timeline (Injects)
+                </h3>
+                <div className="space-y-2">
+                  {generatedStory.injectEvents.map((inj: any, i: number) => (
+                    <div key={i} className="flex items-center gap-3 bg-muted/20 border border-border p-3 rounded-lg text-xs">
+                      <span className="font-mono text-primary font-bold min-w-[60px]">{inj.time}</span>
+                      <p className="flex-1 text-foreground font-medium">{inj.event}</p>
+                      <span className="text-[10px] font-mono bg-muted px-2 py-0.5 rounded text-muted-foreground uppercase">{inj.type}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Personnel Roles Assigned */}
+              <div className="space-y-2">
+                <h3 className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  👥 Assigned Personnel & Roles
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {generatedStory.assignedRoles.map((r: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between bg-muted/20 border border-border p-2.5 rounded text-xs">
+                      <span className="text-foreground">{r.name}</span>
+                      <span className="font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded">{r.count}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Re-configure Footer Action */}
+              <div className="pt-4 border-t border-border flex justify-between items-center">
+                <button 
+                  onClick={() => setTab("selector")}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <RotateCcw size={14} /> Re-configure Settings
+                </button>
+
+                <span className="text-[11px] font-mono text-muted-foreground">
+                  Status: Ready for Drill Execution
+                </span>
+              </div>
+
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
@@ -3542,18 +3966,28 @@ function ParticipantsModule() {
   );
 }
 
+import { 
+  Sparkles, ShieldAlert
+} from "lucide-react";
+
+type EvalModuleTab = "objectives" | "analytics" | "ai" | "assessor";
+
 const trendHistory = [
-  { drill: "D1", avgScore: 61, passRate: 58, respTime: 8.2 }, { drill: "D2", avgScore: 67, passRate: 64, respTime: 7.5 },
-  { drill: "D3", avgScore: 72, passRate: 70, respTime: 6.8 }, { drill: "D4", avgScore: 69, passRate: 66, respTime: 7.1 },
-  { drill: "D5", avgScore: 78, passRate: 75, respTime: 5.9 }, { drill: "D6", avgScore: 82, passRate: 81, respTime: 5.2 },
+  { drill: "D1", avgScore: 61, passRate: 58, respTime: 8.2 },
+  { drill: "D2", avgScore: 67, passRate: 64, respTime: 7.5 },
+  { drill: "D3", avgScore: 72, passRate: 70, respTime: 6.8 },
+  { drill: "D4", avgScore: 69, passRate: 66, respTime: 7.1 },
+  { drill: "D5", avgScore: 78, passRate: 75, respTime: 5.9 },
+  { drill: "D6", avgScore: 82, passRate: 81, respTime: 5.2 },
 ];
 
 const ASSESSOR_PARTICIPANTS = ["Maria Santos", "Jose Reyes", "Carlos Bautista"];
 const SCORE_CATEGORIES = ["Command", "Protocols", "Response Speed", "Coordination"];
 
-function EvalModule() {
+export function EvalModule() {
   const app = useApp();
   const [tab, setTab] = useState<EvalTab>("objectives");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [objs, setObjs] = useState([
     { id: 1, text: "IC assumes command on radio net", done: true, time: "1:42", limit: "2 min" },
     { id: 2, text: "Gas valve shut off at utility panel", done: true, time: "1:58", limit: "2 min" },
@@ -3562,11 +3996,15 @@ function EvalModule() {
     { id: 5, text: "SITREP transmitted to EOC", done: true, time: "9:05", limit: "10 min" },
     { id: 6, text: "Accountability check completed", done: false, time: "—", limit: "10 min" },
   ]);
+
   const passed = objs.filter(o => o.done).length;
   const radarData = [
-    { subject: "Command", A: 88, B: 72 }, { subject: "Response", A: 75, B: 80 },
-    { subject: "Comms", A: 92, B: 65 }, { subject: "Protocols", A: 85, B: 78 },
-    { subject: "Safety", A: 90, B: 82 }, { subject: "Coord.", A: 78, B: 70 },
+    { subject: "Command", A: 88, B: 72 },
+    { subject: "Response", A: 75, B: 80 },
+    { subject: "Comms", A: 92, B: 65 },
+    { subject: "Protocols", A: 85, B: 78 },
+    { subject: "Safety", A: 90, B: 82 },
+    { subject: "Coord.", A: 78, B: 70 },
   ];
 
   const [assessParticipant, setAssessParticipant] = useState(ASSESSOR_PARTICIPANTS[0]);
@@ -3603,40 +4041,279 @@ function EvalModule() {
     setTimeout(() => setJustSubmitted(false), 1800);
   };
 
+  // Upgraded AI Evaluation Logic Engine with Assessor Data Integration
+  const aiReport = useMemo(() => {
+    const total = objs.length;
+    const missedObjs = objs.filter(o => !o.done);
+    const passPercentage = Math.round((passed / total) * 100);
+
+    // 1. Compute Assessor Dashboard Scores
+    const totalAssessorScore = submissions.reduce((acc, s) => acc + s.score, 0);
+    const avgAssessorScore = submissions.length ? Math.round(totalAssessorScore / submissions.length) : 0;
+
+    // 2. Discrepancy & Gap Analysis
+    const scoreGap = avgAssessorScore - passPercentage;
+    let gapInsight = "Field evaluations align well with drill objective completion.";
+    if (scoreGap > 15) {
+      gapInsight = "High field scores despite missed time limits suggest lenient assessor grading or execution bottlenecks.";
+    } else if (scoreGap < -15) {
+      gapInsight = "Strict assessor grading detected relative to objective completion rates.";
+    }
+
+    // 3. Trend & Radar Analysis
+    const firstDrill = trendHistory[0];
+    const latestDrill = trendHistory[trendHistory.length - 1];
+    const scoreGain = latestDrill.avgScore - firstDrill.avgScore;
+    const speedGain = (firstDrill.respTime - latestDrill.respTime).toFixed(1);
+
+    const sortedRadar = [...radarData].sort((a, b) => (a.A + a.B) - (b.A + b.B));
+    const lowestCompetency = sortedRadar[0]?.subject || "Coordination";
+
+    // Readiness Level Assessment
+    let readinessStatus = "CRITICAL";
+    let statusColor = "text-red-400";
+    if (passPercentage >= 85) {
+      readinessStatus = "OPERATIONAL READY";
+      statusColor = "text-green-400";
+    } else if (passPercentage >= 65) {
+      readinessStatus = "MODERATE CAPABILITY";
+      statusColor = "text-yellow-400";
+    }
+
+    return {
+      passPercentage,
+      avgAssessorScore,
+      missedObjs,
+      scoreGain,
+      speedGain,
+      lowestCompetency,
+      readinessStatus,
+      statusColor,
+      summaryText: `The unit demonstrates an overall objective completion rate of ${passPercentage}%. Field assessor evaluations average ${avgAssessorScore}%. ${gapInsight} Response times have improved by ${speedGain} mins across drills (D1-D6).`
+    };
+  }, [objs, passed, submissions]);
+
+  const triggerAiReassessment = () => {
+    setIsAnalyzing(true);
+    setTimeout(() => setIsAnalyzing(false), 1200);
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">PERFORMANCE EVALUATION</h1><p className="text-muted-foreground text-sm mt-0.5">Objective tracking · analytics · assessor dashboard</p></div>
+        <div>
+          <h1 className="text-2xl font-bold font-['Barlow_Condensed'] tracking-wide text-foreground">PERFORMANCE EVALUATION</h1>
+          <p className="text-muted-foreground text-sm mt-0.5">Objective tracking · analytics · AI evaluation engine</p>
+        </div>
         <div className="text-xs font-mono text-muted-foreground bg-secondary px-3 py-2 rounded-md">Earthquake Response — Advanced · Jun 28</div>
       </div>
-      <TabBar tabs={[{ id: "objectives", label: "Objective Tracking", icon: CheckSquare }, { id: "analytics", label: "Analytics", icon: BarChart3 }, { id: "assessor", label: "Assessor Dashboard", icon: Smartphone }]} active={tab} onChange={v => setTab(v as EvalTab)} />
+
+      <TabBar 
+        tabs={[
+          { id: "objectives", label: "Objective Tracking", icon: CheckSquare },
+          { id: "analytics", label: "Analytics", icon: BarChart3 },
+          { id: "ai", label: "AI Evaluation", icon: Sparkles },
+          { id: "assessor", label: "Assessor Dashboard", icon: Smartphone }
+        ]} 
+        active={tab} 
+        onChange={v => setTab(v as EvalTab)} 
+      />
+
+      {/* Tab 1: Objectives */}
       {tab === "objectives" && (
         <div className="space-y-3">
-          <div className="grid grid-cols-4 gap-3">{[{ label: "Total", value: objs.length, color: "text-foreground" }, { label: "Passed", value: passed, color: "text-green-400" }, { label: "Missed", value: objs.length - passed, color: "text-red-400" }, { label: "Score", value: `${Math.round(passed / objs.length * 100)}%`, color: "text-primary" }].map(s => (<div key={s.label} className="bg-card border border-border rounded-lg p-4"><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div><div className={`text-2xl font-bold font-['Barlow_Condensed'] ${s.color}`}>{s.value}</div></div>))}</div>
+          <div className="grid grid-cols-4 gap-3">
+            {[{ label: "Total", value: objs.length, color: "text-foreground" }, { label: "Passed", value: passed, color: "text-green-400" }, { label: "Missed", value: objs.length - passed, color: "text-red-400" }, { label: "Score", value: `${Math.round(passed / objs.length * 100)}%`, color: "text-primary" }].map(s => (
+              <div key={s.label} className="bg-card border border-border rounded-lg p-4">
+                <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div>
+                <div className={`text-2xl font-bold font-['Barlow_Condensed'] ${s.color}`}>{s.value}</div>
+              </div>
+            ))}
+          </div>
           <div className="bg-card border border-border rounded-lg divide-y divide-border">
-            {objs.map(o => (<div key={o.id} className="flex items-center gap-4 px-4 py-3 hover:bg-secondary/30"><button onClick={() => setObjs(prev => prev.map(x => x.id === o.id ? { ...x, done: !x.done } : x))}>{o.done ? <CheckSquare size={17} className="text-green-400" /> : <Square size={17} className="text-muted-foreground" />}</button><span className="flex-1 text-xs text-foreground">{o.text}</span><span className={`text-xs font-mono font-bold ${o.done ? "text-green-400" : "text-red-400"}`}>{o.time}</span><span className="text-[12px] font-mono text-muted-foreground">/ {o.limit}</span></div>))}
+            {objs.map(o => (
+              <div key={o.id} className="flex items-center gap-4 px-4 py-3 hover:bg-secondary/30">
+                <button onClick={() => setObjs(prev => prev.map(x => x.id === o.id ? { ...x, done: !x.done } : x))}>
+                  {o.done ? <CheckSquare size={17} className="text-green-400" /> : <Square size={17} className="text-muted-foreground" />}
+                </button>
+                <span className="flex-1 text-xs text-foreground">{o.text}</span>
+                <span className={`text-xs font-mono font-bold ${o.done ? "text-green-400" : "text-red-400"}`}>{o.time}</span>
+                <span className="text-[12px] font-mono text-muted-foreground">/ {o.limit}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
+
+      {/* Tab 2: Analytics */}
       {tab === "analytics" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="bg-card border border-border rounded-lg p-5"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-4">Competency Radar</h3><ResponsiveContainer width="100%" height={220}><RadarChart data={radarData}><PolarGrid stroke="rgba(240,246,252,0.08)" /><PolarAngleAxis dataKey="subject" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} /><Radar key="radar-eval-alpha" name="Rescue Alpha" dataKey="A" stroke="#f0a500" fill="#f0a500" fillOpacity={0.15} strokeWidth={2} /><Radar key="radar-eval-bravo" name="Medical Bravo" dataKey="B" stroke="#58a6ff" fill="#58a6ff" fillOpacity={0.1} strokeWidth={2} /><Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11 }} /></RadarChart></ResponsiveContainer></div>
-          <div className="bg-card border border-border rounded-lg p-5"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Individual Scores</h3><div className="space-y-2">{[{ name: "Maria Santos", score: 94 }, { name: "Jose Reyes", score: 76 }, { name: "Carlos Bautista", score: 58 }, { name: "Ana Cruz", score: 88 }, { name: "Elena Villanueva", score: 91 }].map(p => (<div key={p.name} className="flex items-center gap-3"><span className="text-xs text-foreground w-36 truncate">{p.name}</span><div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${p.score >= 80 ? "bg-green-400" : p.score >= 65 ? "bg-primary" : "bg-red-400"}`} style={{ width: `${p.score}%` }} /></div><span className={`text-xs font-mono font-bold w-8 text-right ${p.score >= 80 ? "text-green-400" : p.score >= 65 ? "text-primary" : "text-red-400"}`}>{p.score}</span></div>))}</div></div>
+          <div className="bg-card border border-border rounded-lg p-5">
+            <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-4">Competency Radar</h3>
+            <ResponsiveContainer width="100%" height={220}>
+              <RadarChart data={radarData}>
+                <PolarGrid stroke="rgba(240,246,252,0.08)" />
+                <PolarAngleAxis dataKey="subject" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} />
+                <Radar key="radar-eval-alpha" name="Rescue Alpha" dataKey="A" stroke="#f0a500" fill="#f0a500" fillOpacity={0.15} strokeWidth={2} />
+                <Radar key="radar-eval-bravo" name="Medical Bravo" dataKey="B" stroke="#58a6ff" fill="#58a6ff" fillOpacity={0.1} strokeWidth={2} />
+                <Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11 }} />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="bg-card border border-border rounded-lg p-5">
+            <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Individual Scores</h3>
+            <div className="space-y-2">
+              {[{ name: "Maria Santos", score: 94 }, { name: "Jose Reyes", score: 76 }, { name: "Carlos Bautista", score: 58 }, { name: "Ana Cruz", score: 88 }, { name: "Elena Villanueva", score: 91 }].map(p => (
+                <div key={p.name} className="flex items-center gap-3">
+                  <span className="text-xs text-foreground w-36 truncate">{p.name}</span>
+                  <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${p.score >= 80 ? "bg-green-400" : p.score >= 65 ? "bg-primary" : "bg-red-400"}`} style={{ width: `${p.score}%` }} />
+                  </div>
+                  <span className={`text-xs font-mono font-bold w-8 text-right ${p.score >= 80 ? "text-green-400" : p.score >= 65 ? "text-primary" : "text-red-400"}`}>{p.score}</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
+
+      {/* Tab 3: AI Evaluation Module */}
+      {(tab as string) === "ai" && (
+        <div className="space-y-4">
+          <div className="bg-card border border-border rounded-lg p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2">
+                <Cpu className="text-primary" size={20} />
+                <h3 className="text-sm font-bold text-foreground uppercase tracking-wider font-['Barlow_Condensed']">AI Evaluation & Tactical Insights</h3>
+              </div>
+              <button 
+                onClick={triggerAiReassessment} 
+                disabled={isAnalyzing}
+                className="flex items-center gap-1.5 text-xs bg-secondary hover:bg-secondary/80 px-3 py-1.5 rounded-md text-foreground transition-colors disabled:opacity-50"
+              >
+                <RefreshCw size={13} className={isAnalyzing ? "animate-spin" : ""} />
+                {isAnalyzing ? "Analyzing Drill..." : "Re-Run AI Analysis"}
+              </button>
+            </div>
+
+            {/* Top Cards: Status Overview */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+              <div className="bg-secondary/40 border border-border p-3.5 rounded-md">
+                <div className="text-[11px] font-mono text-muted-foreground uppercase">Readiness Assessment</div>
+                <div className={`text-lg font-bold font-['Barlow_Condensed'] mt-1 ${aiReport.statusColor}`}>
+                  {aiReport.readinessStatus}
+                </div>
+              </div>
+              <div className="bg-secondary/40 border border-border p-3.5 rounded-md">
+                <div className="text-[11px] font-mono text-muted-foreground uppercase">Field Assessor Avg</div>
+                <div className="text-lg font-bold font-['Barlow_Condensed'] mt-1 text-primary">
+                  {aiReport.avgAssessorScore}%
+                </div>
+              </div>
+              <div className="bg-secondary/40 border border-border p-3.5 rounded-md">
+                <div className="text-[11px] font-mono text-muted-foreground uppercase">Response Efficiency</div>
+                <div className="text-lg font-bold font-['Barlow_Condensed'] mt-1 text-foreground flex items-center gap-1">
+                  <TrendingUp size={16} className="text-green-400" />
+                  +{aiReport.speedGain} min
+                </div>
+              </div>
+              <div className="bg-secondary/40 border border-border p-3.5 rounded-md">
+                <div className="text-[11px] font-mono text-muted-foreground uppercase">Focus Gap Sector</div>
+                <div className="text-lg font-bold font-['Barlow_Condensed'] mt-1 text-primary">
+                  {aiReport.lowestCompetency}
+                </div>
+              </div>
+            </div>
+
+            {/* AI Narrative Analysis */}
+            <div className="bg-secondary/20 border border-primary/20 rounded-md p-4 space-y-2">
+              <div className="flex items-center gap-2 text-primary font-mono text-xs uppercase font-semibold">
+                <Sparkles size={14} /> Executive Summary Directive
+              </div>
+              <p className="text-xs leading-relaxed text-foreground/90 font-mono">
+                {aiReport.summaryText}
+              </p>
+            </div>
+
+            {/* Bottlenecks and Failure Points */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="bg-card border border-border rounded-md p-4 space-y-2">
+                <h4 className="text-xs font-mono font-bold text-red-400 uppercase tracking-wider flex items-center gap-2">
+                  <ShieldAlert size={15} /> Identified Failure Points ({aiReport.missedObjs.length})
+                </h4>
+                {aiReport.missedObjs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic">All drill objectives completed successfully.</p>
+                ) : (
+                  <ul className="space-y-2 text-xs">
+                    {aiReport.missedObjs.map(m => (
+                      <li key={m.id} className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 p-2 rounded">
+                        <AlertTriangle size={14} className="text-red-400 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="font-semibold text-foreground">{m.text}</span>
+                          <div className="text-[11px] font-mono text-muted-foreground">Recorded Time: {m.time} (Target Limit: {m.limit})</div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {/* Actionable Recommendations */}
+              <div className="bg-card border border-border rounded-md p-4 space-y-2">
+                <h4 className="text-xs font-mono font-bold text-green-400 uppercase tracking-wider flex items-center gap-2">
+                  <CheckCircle size={15} /> Tactical Action Items
+                </h4>
+                <ul className="space-y-2 text-xs">
+                  <li className="flex items-start gap-2 bg-secondary/50 p-2 rounded border border-border">
+                    <span className="text-primary font-bold">1.</span>
+                    <span className="text-foreground">Re-evaluate staging protocols for <b>{aiReport.lowestCompetency}</b> team units in subsequent scenarios.</span>
+                  </li>
+                  <li className="flex items-start gap-2 bg-secondary/50 p-2 rounded border border-border">
+                    <span className="text-primary font-bold">2.</span>
+                    <span className="text-foreground">Enforce mandatory radio check-in procedures prior to the 5-minute mark to fix timing gaps.</span>
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Tab 4: Assessor Dashboard */}
       {tab === "assessor" && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-card border border-border rounded-lg p-5 space-y-4"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Quick Score Entry</h3>
-              <select value={assessParticipant} onChange={e => setAssessParticipant(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-2 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">{ASSESSOR_PARTICIPANTS.map(name => <option key={name} value={name}>{name}</option>)}</select>
-              <div className="grid grid-cols-2 gap-3">{SCORE_CATEGORIES.map(c => (<div key={c}><label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">{c}</label><input type="number" min="0" max="100" value={assessScores[c]} onChange={e => setAssessScores(prev => ({ ...prev, [c]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) }))} className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" /></div>))}</div>
+            <div className="bg-card border border-border rounded-lg p-5 space-y-4">
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Quick Score Entry</h3>
+              <select value={assessParticipant} onChange={e => setAssessParticipant(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-2 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                {ASSESSOR_PARTICIPANTS.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+              <div className="grid grid-cols-2 gap-3">
+                {SCORE_CATEGORIES.map(c => (
+                  <div key={c}>
+                    <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">{c}</label>
+                    <input type="number" min="0" max="100" value={assessScores[c]} onChange={e => setAssessScores(prev => ({ ...prev, [c]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) }))} className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+                  </div>
+                ))}
+              </div>
               <textarea rows={3} value={assessNotes} onChange={e => setAssessNotes(e.target.value)} placeholder="Field observations..." className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
               <div className="flex items-center justify-between">
                 <span className="text-[12px] font-mono text-muted-foreground">Overall: <span className={`font-bold ${overallScore >= 80 ? "text-green-400" : overallScore >= 65 ? "text-primary" : "text-red-400"}`}>{overallScore}%</span></span>
-                <button onClick={handleSubmitScore} disabled={!assessParticipant} className={`flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 ${justSubmitted ? "bg-green-500/90 text-white" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>{justSubmitted ? <CheckCircle size={15} /> : <Send size={15} />}{justSubmitted ? "Submitted" : "Submit"}</button>
+                <button onClick={handleSubmitScore} disabled={!assessParticipant} className={`flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 ${justSubmitted ? "bg-green-500/90 text-white" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>{justSubmitted ? "Submitted" : "Submit"}</button>
               </div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-5 space-y-3"><h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Submissions</h3>{submissions.map((s, i) => (<div key={i} className="p-2.5 rounded-md bg-secondary/60"><div className="flex items-center justify-between"><span className="text-xs font-semibold text-foreground">{s.name}</span><span className={`text-xs font-bold font-mono ${s.score >= 80 ? "text-green-400" : "text-primary"}`}>{s.score}</span></div><p className="text-[12px] text-muted-foreground mt-0.5">{s.note}</p></div>))}</div>
+            <div className="bg-card border border-border rounded-lg p-5 space-y-3">
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Submissions</h3>
+              {submissions.map((s, i) => (
+                <div key={i} className="p-2.5 rounded-md bg-secondary/60">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-foreground">{s.name}</span>
+                    <span className={`text-xs font-bold font-mono ${s.score >= 80 ? "text-green-400" : "text-primary"}`}>{s.score}</span>
+                  </div>
+                  <p className="text-[12px] text-muted-foreground mt-0.5">{s.note}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -4576,13 +5253,7 @@ export default function App() {
     link.href = BARANGAY_LOGO_IMG;
     document.head.appendChild(link);
     async function loadData() {
-    // Kung "training program" ang eksaktong pangalan sa Supabase dashboard:
-    const { data, error } = await supabase.from('training_program').select('*');
-    if (error) {
-      console.error('Supabase Error:', error);
-    } else {
-      console.log('Data galing Supabase:', data);
-    }
+
   }
   loadData();
 
@@ -4602,4 +5273,18 @@ export default function App() {
     </AppProvider>
   );
 }
+
+// Inside your main App or Page JSX return statement:
+export function map() {
+  return (
+    <div className="p-6">
+      
+      {/* Renders your location map card */}
+      <LocationMap />
+
+    </div>
+  );
+}
+
+
 
