@@ -988,7 +988,7 @@ function ToastContainer() {
 }
 
 function SessionTimeoutHandler({ onLogout }: { onLogout: (reason?: string) => void }) {
-  const TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
+  const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
   const WARNING_MS = 60 * 1000; // Warning at 60s remaining
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
@@ -2216,9 +2216,8 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                     <button
                       key={item.id}
                       onClick={() => { setMod(item.id); setMobileNavOpen(false); }}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${
-                        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
-                      }`}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                        }`}
                     >
                       <Icon size={16} className={active ? "text-primary" : "text-current"} />
                       <span>{item.label}</span>
@@ -6040,9 +6039,8 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                     <button
                       key={item.id}
                       onClick={() => { setMod(item.id); setMobileNavOpen(false); }}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${
-                        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
-                      }`}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                        }`}
                     >
                       <Icon size={16} className={active ? "text-primary" : "text-current"} />
                       <span>{item.label}</span>
@@ -6218,9 +6216,8 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
                           <button
                             key={item.id}
                             onClick={() => { setMod(item.id); setMobileNavOpen(false); }}
-                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${
-                              active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
-                            }`}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                              }`}
                           >
                             <Icon size={16} className={active ? "text-primary" : "text-current"} />
                             <span>{item.label}</span>

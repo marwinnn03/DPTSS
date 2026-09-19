@@ -160,6 +160,21 @@ const LS_KEYS = {
 
 function uid(prefix = "id") { return `${prefix}-${Math.random().toString(36).slice(2, 9)}`; }
 
+function isValidUUID(str?: string): boolean {
+  if (!str) return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
+function generateUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 function minutesAgo(m: number) { return new Date(Date.now() - m * 60000).toISOString(); }
 
 function seedNotifications(): Notification[] {
@@ -271,7 +286,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     fetchSupabaseUsers();
   }, []);
-  
+
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
     localStorage.setItem(LS_KEYS.darkMode, String(darkMode));
@@ -310,22 +325,225 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const dismissToast = () => setToast(null);
 
+  const [hasExtendedCols, setHasExtendedCols] = useState<boolean | null>(null);
+
+  // Synchronize programs from Supabase public.programs table on mount
+  useEffect(() => {
+    const fetchSupabasePrograms = async () => {
+      try {
+        // Probe if extended column 'assessor' exists in the Supabase schema
+        const { error: probeErr } = await supabase.from("programs").select("assessor").limit(0);
+        const hasExt = !probeErr;
+        setHasExtendedCols(hasExt);
+
+        const { data, error } = await supabase
+          .from("programs")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          const remotePrograms: Program[] = data.map((p: any) => {
+            const rawDesc = p.description || "";
+            const levelMatch = rawDesc.match(/\[Level:\s*([^\]]+)\]/);
+            const modulesMatch = rawDesc.match(/\[Modules:\s*([^\]]+)\]/);
+            const durationMatch = rawDesc.match(/\[Duration:\s*([^\]]+)\]/);
+            const assessorMatch = rawDesc.match(/\[Assessor:\s*([^\]]+)\]/);
+            const disasterMatch = rawDesc.match(/\[Disaster:\s*([^\]]+)\]/);
+            const cleanDesc = rawDesc.replace(/\s*\[(Level|Modules|Duration|Assessor|Disaster):[^\]]+\]/g, "").trim();
+
+            return {
+              id: p.id,
+              title: p.title,
+              level: p.level || (levelMatch ? levelMatch[1] : "Basic"),
+              modules: p.modules || (modulesMatch ? Number(modulesMatch[1]) : 1),
+              duration: p.duration || (durationMatch ? durationMatch[1] : "1 Day"),
+              status: p.status || "Active",
+              description: cleanDesc || rawDesc,
+              objectives: Array.isArray(p.objectives) ? p.objectives : [],
+              prerequisites: p.prerequisites || "None",
+              targetAudience: p.target_audience || "",
+              certificationName: p.certification_name || "",
+              passingScore: p.passing_score || 80,
+              tags: Array.isArray(p.tags) ? p.tags : [],
+              createdBy: p.created_by || "Admin",
+              createdDate: p.created_at || new Date().toISOString(),
+              lastUpdated: p.updated_at || new Date().toISOString(),
+              moduleList: Array.isArray(p.module_list) ? p.module_list : [],
+              assessor: p.assessor || (assessorMatch ? assessorMatch[1] : undefined),
+              disasterType: p.disaster_type || (disasterMatch ? disasterMatch[1] : undefined),
+              estimatedCost: p.estimated_cost ? Number(p.estimated_cost) : undefined,
+            };
+          });
+
+          setPrograms(prev => {
+            const progMap = new Map<string, Program>();
+            // Remote database programs take priority
+            remotePrograms.forEach(rp => progMap.set(rp.id || rp.title, rp));
+            prev.forEach(lp => {
+              const key = lp.id || lp.title;
+              if (!progMap.has(key)) {
+                progMap.set(key, lp);
+              }
+            });
+            return Array.from(progMap.values());
+          });
+        }
+      } catch (err) {
+        console.warn("Supabase initial programs load notice:", err);
+      }
+    };
+
+    fetchSupabasePrograms();
+  }, []);
+
+  const insertProgramToSupabase = async (newProg: Program) => {
+    try {
+      // Build metadata summary in description if database has only core columns
+      const metaTokens = [
+        newProg.level ? `[Level: ${newProg.level}]` : "",
+        newProg.modules ? `[Modules: ${newProg.modules}]` : "",
+        newProg.duration ? `[Duration: ${newProg.duration}]` : "",
+        newProg.assessor ? `[Assessor: ${newProg.assessor}]` : "",
+        newProg.disasterType ? `[Disaster: ${newProg.disasterType}]` : "",
+      ].filter(Boolean).join(" ");
+
+      const compositeDesc = newProg.description
+        ? `${newProg.description}${metaTokens ? ` — ${metaTokens}` : ""}`
+        : metaTokens || "Disaster preparedness training curriculum";
+
+      // If extended columns are confirmed to exist, send full payload; otherwise send safe compatible payload
+      const insertPayload: Record<string, any> = hasExtendedCols === true ? {
+        title: newProg.title,
+        level: newProg.level,
+        modules: newProg.modules,
+        duration: newProg.duration,
+        status: newProg.status || "Draft",
+        description: newProg.description || null,
+        objectives: newProg.objectives || [],
+        prerequisites: newProg.prerequisites || null,
+        target_audience: newProg.targetAudience || null,
+        certification_name: newProg.certificationName || null,
+        passing_score: newProg.passingScore || 80,
+        tags: newProg.tags || [],
+        disaster_type: newProg.disasterType || null,
+        estimated_cost: newProg.estimatedCost || 0,
+        module_list: newProg.moduleList || [],
+        assessor: newProg.assessor || null,
+      } : {
+        title: newProg.title,
+        description: compositeDesc,
+        status: newProg.status || "Draft",
+      };
+
+      // Only pass UUID for created_by or id if valid (avoids 22P02 invalid UUID syntax)
+      if (newProg.createdBy && isValidUUID(newProg.createdBy)) {
+        insertPayload.created_by = newProg.createdBy;
+      }
+      if (isValidUUID(newProg.id)) {
+        insertPayload.id = newProg.id;
+      }
+
+      let { data, error } = await supabase.from("programs").insert(insertPayload).select();
+
+      // If full payload failed because of missing column, fallback to safe core payload
+      if (error && (error.message?.includes("Could not find") || error.code === "PGRST204")) {
+        setHasExtendedCols(false);
+        const safeFallback: Record<string, any> = {
+          title: newProg.title,
+          description: compositeDesc,
+          status: newProg.status || "Draft",
+        };
+        if (isValidUUID(newProg.id)) {
+          safeFallback.id = newProg.id;
+        }
+        const retryRes = await supabase.from("programs").insert(safeFallback).select();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
+
+      if (error) {
+        console.warn("Supabase programs insert note:", error.message, error.code);
+        if (error.code === "42501" || error.message?.includes("row-level security")) {
+          showToast({
+            type: "warning",
+            title: "Supabase RLS Restriction",
+            message: "Database blocked insert due to RLS. Run 'ALTER TABLE public.programs DISABLE ROW LEVEL SECURITY;' in your Supabase SQL Editor.",
+            duration: 10000
+          });
+        } else if (error.code === "23502" || error.message?.includes("not-null constraint")) {
+          showToast({
+            type: "warning",
+            title: "Database Constraint Notice",
+            message: "Run 'ALTER TABLE public.programs ALTER COLUMN created_by DROP NOT NULL;' in your Supabase SQL Editor.",
+            duration: 12000
+          });
+        } else if (error.code === "23503" || error.message?.includes("foreign key constraint")) {
+          showToast({
+            type: "warning",
+            title: "Database Foreign Key Notice",
+            message: "Run 'ALTER TABLE public.programs DROP CONSTRAINT IF EXISTS fk_programs_created_by;' in your Supabase SQL Editor.",
+            duration: 12000
+          });
+        } else {
+          showToast({
+            type: "warning",
+            title: "Database Sync Note",
+            message: `Saved locally. Database note: ${error.message}`
+          });
+        }
+      } else {
+        console.log("Supabase programs insert successful:", data);
+        showToast({
+          type: "success",
+          title: "Database Synchronized",
+          message: `Program "${newProg.title}" successfully saved to your database!`
+        });
+        if (data && data[0] && data[0].id) {
+          setPrograms(prev => prev.map(p => (p.title === newProg.title && (!p.id || p.id === newProg.id)) ? { ...p, id: data[0].id } : p));
+        }
+      }
+    } catch (err: any) {
+      console.warn("Supabase insert program exception:", err);
+    }
+  };
+
   const addProgram = (p: Program) => {
-    const newProg: Program = { ...p, id: p.id || uid("PRG"), createdDate: p.createdDate || new Date().toISOString() };
+    const assignedId = p.id && isValidUUID(p.id) ? p.id : generateUUID();
+    const newProg: Program = { ...p, id: assignedId, createdDate: p.createdDate || new Date().toISOString() };
     setPrograms(prev => [newProg, ...prev]);
     showToast({ type: "success", title: "Program Created", message: `"${newProg.title}" has been saved.` });
     addNotification({ type: "System", subject: `New program added: ${newProg.title}`, status: "Sent" });
+    insertProgramToSupabase(newProg);
   };
 
   const updateProgram = (id: string, updates: Partial<Program>) => {
     setPrograms(prev => prev.map(p => p.id === id ? { ...p, ...updates, lastUpdated: new Date().toISOString() } : p));
     showToast({ type: "info", title: "Program Updated", message: "Program changes saved." });
+
+    if (isValidUUID(id)) {
+      supabase.from("programs").update({
+        ...(updates.title && { title: updates.title }),
+        ...(updates.description && { description: updates.description }),
+        ...(updates.level && { level: updates.level }),
+        ...(updates.modules !== undefined && { modules: updates.modules }),
+        ...(updates.status && { status: updates.status }),
+        ...(updates.duration && { duration: updates.duration }),
+      }).eq("id", id).then(res => {
+        if (res.error) console.warn("Supabase update program error:", res.error);
+      });
+    }
   };
 
   const deleteProgram = (id: string) => {
     const target = programs.find(p => p.id === id);
     setPrograms(prev => prev.filter(p => p.id !== id));
     showToast({ type: "warning", title: "Program Deleted", message: target ? `"${target.title}" was removed.` : "Program removed." });
+
+    if (isValidUUID(id)) {
+      supabase.from("programs").delete().eq("id", id).then(res => {
+        if (res.error) console.warn("Supabase delete program error:", res.error);
+      });
+    }
   };
 
   const createSession = (s: Session): string => {
