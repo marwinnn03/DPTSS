@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { LocationMap } from './components/LocationMap';
 import { supabase } from '../supabaseClient';
 import { useState, useRef, useEffect } from "react";
@@ -12,7 +13,7 @@ import {
   User, ChevronDown, AlertTriangle, Mail, BookMarked, Sliders, List,
   PlusCircle, Trash2, ChevronUp, CheckSquare, Square, Timer, Smartphone,
   FileCheck, TrendingUp as Trend, Building2, Package, UserCheck, LogIn,
-  Send, Info, Check, X, Lock, LogOut, Key, Settings, ShieldCheck,
+  Send, Info, Check, X, Lock, LogOut, Key, Settings, ShieldCheck, Menu,
   UserPlus, UserX, RefreshCw, ToggleLeft, ToggleRight, Hash, Globe,
   ClipboardList, Star, Award, Sun, Moon, Phone, Briefcase, MapPinned, ArrowRight,
   CheckCircle2, Crown,
@@ -148,13 +149,13 @@ function Badge({ status, children }: { status?: string; children: React.ReactNod
 
 function TabBar({ tabs, active, onChange }: { tabs: { id: string; label: string; icon: React.ElementType }[]; active: string; onChange: (v: string) => void }) {
   return (
-    <div className="flex gap-0.5 bg-secondary p-1 rounded-lg w-fit flex-wrap">
+    <div className="flex gap-1 bg-secondary p-1 rounded-lg max-w-full overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] flex-nowrap sm:flex-wrap shrink-0">
       {tabs.map(t => {
         const Icon = t.icon;
         return (
           <motion.button key={t.id} onClick={() => onChange(t.id)}
             whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.96 }}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${active === t.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap cursor-pointer ${active === t.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
             <Icon size={14} />{t.label}
           </motion.button>
         );
@@ -347,55 +348,81 @@ function NotificationBell({ role }: { role: Role }) {
           </motion.div>
         )}
       </AnimatePresence>
-      {viewing && <NotificationDetailModal notification={viewing} onClose={() => setViewing(null)} onClear={() => { app.clearNotification(viewing.id); setViewing(null); }} />}
+      <AnimatePresence>
+        {viewing && (
+          <NotificationDetailModal
+            notification={viewing}
+            onClose={() => setViewing(null)}
+            onClear={() => { app.clearNotification(viewing.id); setViewing(null); }}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 function NotificationDetailModal({ notification, onClose, onClear }: { notification: Notification; onClose: () => void; onClear: () => void }) {
   const Icon = notificationIcon(notification.type);
-  return (
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <motion.div
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       onClick={onClose}
-      className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-[99999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
     >
       <motion.div
-        initial={{ opacity: 0, y: 12, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 12, scale: 0.97 }}
-        transition={{ duration: 0.18 }}
+        initial={{ opacity: 0, y: 16, scale: 0.96 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 16, scale: 0.96 }}
+        transition={{ duration: 0.2 }}
         onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-card border border-border rounded-lg shadow-xl overflow-hidden"
+        className="w-full max-w-md bg-card border border-border rounded-2xl shadow-2xl overflow-hidden"
       >
-        <div className="flex items-start gap-3 px-4 py-3.5 border-b border-border bg-secondary/30">
-          <div className="w-8 h-8 rounded-full bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
-            <Icon size={16} />
+        <div className="flex items-start gap-3.5 px-5 py-4 border-b border-border bg-secondary/30">
+          <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center flex-shrink-0">
+            <Icon size={18} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-foreground leading-snug">{notification.subject}</div>
+            <div className="text-sm font-bold text-foreground leading-snug">{notification.subject}</div>
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-secondary text-muted-foreground">{notification.type}</span>
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground">{notification.type}</span>
               {notification.status && <Badge status={notification.status}>{notification.status}</Badge>}
             </div>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0"><X size={16} /></button>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors flex-shrink-0 p-1.5 rounded-lg hover:bg-secondary cursor-pointer"
+          >
+            <X size={16} />
+          </button>
         </div>
-        <div className="px-4 py-4 space-y-3">
+        <div className="px-5 py-4 space-y-3">
           <p className="text-sm text-foreground leading-relaxed">{notification.body ?? "No additional details for this notification."}</p>
           <div className="flex items-center gap-1.5 text-[12px] font-mono text-muted-foreground">
-            <Clock size={11} />
+            <Clock size={12} />
             {new Date(notification.date).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}
           </div>
         </div>
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-border bg-secondary/20">
-          <button onClick={onClear} className="text-xs text-red-400 hover:text-red-300 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20 transition-colors flex items-center gap-1.5">
+        <div className="flex items-center justify-end gap-2.5 px-5 py-3.5 border-t border-border bg-secondary/20">
+          <button
+            onClick={onClear}
+            className="text-xs text-red-400 hover:text-red-300 px-3.5 py-2 rounded-lg bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 transition-colors flex items-center gap-1.5 font-medium cursor-pointer"
+          >
             <Trash2 size={13} />Dismiss
           </button>
-          <button onClick={onClose} className="text-xs text-foreground px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors">
+          <button
+            onClick={onClose}
+            className="text-xs font-semibold text-foreground px-4 py-2 rounded-lg bg-secondary hover:bg-secondary/80 border border-border transition-colors cursor-pointer"
+          >
             Close
           </button>
         </div>
       </motion.div>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 }
 
@@ -691,7 +718,7 @@ function ApplyConfirmModal({ target, onConfirm, onCancel }: { target: ApplyTarge
                 whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-black text-sm font-bold transition-colors shadow-lg shadow-emerald-500/25 cursor-pointer"
               >
-                <Check size={16} />Confirm & Apply
+                <Check size={16} />Confirm
               </motion.button>
             </motion.div>
           </div>
@@ -726,21 +753,21 @@ function CertificateModal({ auth, record, onClose }: { auth: AuthUser; record: A
           onClick={onClose}
         />
         <motion.div
-          className="relative bg-card/95 border border-border rounded-3xl backdrop-blur-xl shadow-2xl w-full max-w-2xl overflow-hidden print:shadow-none print:border-0 print:max-w-none print:rounded-none"
+          className="relative bg-card/95 border border-border rounded-2xl sm:rounded-3xl backdrop-blur-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto print:shadow-none print:border-0 print:max-w-none print:rounded-none print:max-h-none"
           initial={{ opacity: 0, scale: 0.94, y: 16 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
           exit={{ opacity: 0, scale: 0.96, y: 8 }}
           transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
         >
-          <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-secondary/30 print:hidden">
+          <div className="flex items-center justify-between px-4 sm:px-5 py-3 border-b border-border bg-secondary/30 print:hidden">
             <div className="flex items-center gap-2 text-sm font-semibold text-foreground"><Award size={16} className="text-primary" />Certificate of Completion</div>
-            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors"><X size={16} /></button>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"><X size={16} /></button>
           </div>
 
-          <div id="certificate-print-area" className="bg-white p-10">
-            <div className="border-[3px] border-double p-8 text-center" style={{ borderColor: "#b91c1c" }}>
+          <div id="certificate-print-area" className="bg-white p-4 sm:p-10">
+            <div className="border-[2px] sm:border-[3px] border-double p-4 sm:p-8 text-center" style={{ borderColor: "#b91c1c" }}>
               <div className="flex items-center justify-center gap-2 mb-2">
-                <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ backgroundColor: "#b91c1c" }}>
+                <div className="w-9 h-9 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: "#b91c1c" }}>
                   <Shield size={18} color="#ffffff" />
                 </div>
                 <div className="text-left leading-none">
@@ -749,17 +776,17 @@ function CertificateModal({ auth, record, onClose }: { auth: AuthUser; record: A
                 </div>
               </div>
 
-              <div className="text-[11px] tracking-[0.3em] uppercase mt-6" style={{ color: "#6b7280" }}>Certificate of Completion</div>
-              <div className="text-3xl font-bold font-display tracking-wide mt-2" style={{ color: "#111827" }}>THIS IS TO CERTIFY THAT</div>
+              <div className="text-[10px] sm:text-[11px] tracking-[0.25em] sm:tracking-[0.3em] uppercase mt-4 sm:mt-6" style={{ color: "#6b7280" }}>Certificate of Completion</div>
+              <div className="text-xl sm:text-3xl font-bold font-display tracking-wide mt-2" style={{ color: "#111827" }}>THIS IS TO CERTIFY THAT</div>
 
-              <div className="text-2xl font-semibold mt-5 pb-2 inline-block" style={{ color: "#b91c1c", borderBottom: "1px solid #d1d5db" }}>{auth.name}</div>
+              <div className="text-xl sm:text-2xl font-semibold mt-3 sm:mt-5 pb-2 inline-block max-w-full truncate" style={{ color: "#b91c1c", borderBottom: "1px solid #d1d5db" }}>{auth.name}</div>
 
-              <p className="text-sm mt-5 leading-relaxed max-w-md mx-auto" style={{ color: "#374151" }}>
+              <p className="text-xs sm:text-sm mt-3 sm:mt-5 leading-relaxed max-w-md mx-auto" style={{ color: "#374151" }}>
                 has successfully completed the training program
               </p>
-              <div className="text-xl font-bold font-display mt-1" style={{ color: "#111827" }}>{record.program}</div>
+              <div className="text-lg sm:text-xl font-bold font-display mt-1" style={{ color: "#111827" }}>{record.program}</div>
 
-              <div className="flex items-center justify-center gap-8 mt-6 text-xs" style={{ color: "#374151" }}>
+              <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-8 mt-5 sm:mt-6 text-xs" style={{ color: "#374151" }}>
                 <div><div className="tracking-widest uppercase text-[10px]" style={{ color: "#9ca3af" }}>Date Completed</div><div className="font-semibold mt-0.5">{completedDate}</div></div>
                 {typeof record.score === "number" && (
                   <div><div className="tracking-widest uppercase text-[10px]" style={{ color: "#9ca3af" }}>Score</div><div className="font-semibold mt-0.5">{record.score}%</div></div>
@@ -767,7 +794,7 @@ function CertificateModal({ auth, record, onClose }: { auth: AuthUser; record: A
                 <div><div className="tracking-widest uppercase text-[10px]" style={{ color: "#9ca3af" }}>Certificate ID</div><div className="font-semibold mt-0.5 font-mono">{certId}</div></div>
               </div>
 
-              <div className="flex items-end justify-center gap-16 mt-10">
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 mt-6 sm:mt-10">
                 <div className="text-center">
                   <div className="w-40 border-t pt-1" style={{ borderColor: "#9ca3af" }}>
                     <div className="text-xs font-semibold" style={{ color: "#111827" }}>Training Command</div>
@@ -784,9 +811,9 @@ function CertificateModal({ auth, record, onClose }: { auth: AuthUser; record: A
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border bg-secondary/20 print:hidden">
-            <button onClick={onClose} className="text-xs text-foreground px-3 py-1.5 rounded-md bg-secondary hover:bg-secondary/70 transition-colors">Close</button>
-            <button onClick={() => window.print()} className="text-xs text-primary-foreground bg-primary hover:bg-primary/90 px-3 py-1.5 rounded-md transition-colors flex items-center gap-1.5">
+          <div className="flex items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t border-border bg-secondary/20 print:hidden">
+            <button onClick={onClose} className="text-xs text-foreground px-3.5 py-2 rounded-md bg-secondary hover:bg-secondary/70 transition-colors cursor-pointer">Close</button>
+            <button onClick={() => window.print()} className="text-xs text-primary-foreground bg-primary hover:bg-primary/90 px-3.5 py-2 rounded-md transition-colors flex items-center gap-1.5 cursor-pointer">
               <Download size={13} />Download PDF
             </button>
           </div>
@@ -961,7 +988,7 @@ function ToastContainer() {
 }
 
 function SessionTimeoutHandler({ onLogout }: { onLogout: (reason?: string) => void }) {
-  const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+  const TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
   const WARNING_MS = 60 * 1000; // Warning at 60s remaining
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
@@ -1058,29 +1085,29 @@ function SessionTimeoutHandler({ onLogout }: { onLogout: (reason?: string) => vo
   );
 }
 
-function LoginScreen({ 
-  onLogin, 
+function LoginScreen({
+  onLogin,
   onBack,
   initialMode = "signin"
-}: { 
-  onLogin: (u: AuthUser) => void; 
+}: {
+  onLogin: (u: AuthUser) => void;
   onBack?: () => void;
   initialMode?: "signin" | "register";
 }) {
   const app = useApp();
   const [authMode, setAuthMode] = useState<"signin" | "register">(initialMode);
-  
+
   // Sign In States
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [signInRole, setSignInRole] = useState<AuthRole>("user");
-  
+
   // Register States
   const [regFullName, setRegFullName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
-  
+
   // Error and UI States
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
@@ -1292,7 +1319,7 @@ function LoginScreen({
     });
 
     app.showToast(`Account registered successfully! Welcome, ${newAcc.name}! Please sign in to continue.`, "success", "Registration Successful");
-    
+
     // Switch to sign-in form so resident can log in
     setAuthMode("signin");
     setSignInRole("user");
@@ -1377,8 +1404,8 @@ function LoginScreen({
 
       <div className="w-full max-w-[440px] relative z-10 flex flex-col items-center">
         {onBack && (
-          <button 
-            onClick={onBack} 
+          <button
+            onClick={onBack}
             className="self-start flex items-center gap-1.5 text-xs font-bold text-gray-500 hover:text-gray-900 mb-4 transition-colors cursor-pointer"
           >
             <ChevronRight size={14} className="rotate-180" />
@@ -1388,12 +1415,12 @@ function LoginScreen({
 
         {/* Central Authentication Card */}
         <div className="w-full bg-white rounded-[28px] p-7 sm:p-9 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.08),0_1px_3px_rgba(0,0,0,0.04)] border border-gray-100 flex flex-col items-center">
-          
+
           {/* Barangay Culiat Logo */}
-          <img 
-            src={BARANGAY_LOGO_IMG} 
-            alt="Barangay Culiat Logo" 
-            className="w-14 h-14 rounded-full object-cover shadow-sm border border-gray-100 mb-3.5" 
+          <img
+            src={BARANGAY_LOGO_IMG}
+            alt="Barangay Culiat Logo"
+            className="w-14 h-14 rounded-full object-cover shadow-sm border border-gray-100 mb-3.5"
           />
 
           {step === "credentials" ? (
@@ -1408,8 +1435,8 @@ function LoginScreen({
                 {authMode === "signin" ? "Welcome back" : "Create your account"}
               </h1>
               <p className="text-xs text-gray-500 text-center font-normal leading-relaxed max-w-[340px] mb-5">
-                {authMode === "signin" 
-                  ? "Residents and barangay officials both sign in here — you will land in the right workspace for your account." 
+                {authMode === "signin"
+                  ? "Residents and barangay officials both sign in here — you will land in the right workspace for your account."
                   : "Residents / mga residente: create an account to register for campaigns and get your QR ticket."}
               </p>
 
@@ -1418,22 +1445,20 @@ function LoginScreen({
                 <button
                   type="button"
                   onClick={() => { setAuthMode("signin"); setError(""); setSuccessMsg(""); }}
-                  className={`flex-1 py-2 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer ${
-                    authMode === "signin"
-                      ? "bg-white text-gray-950 shadow-xs"
-                      : "text-gray-500 hover:text-gray-900"
-                  }`}
+                  className={`flex-1 py-2 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer ${authMode === "signin"
+                    ? "bg-white text-gray-950 shadow-xs"
+                    : "text-gray-500 hover:text-gray-900"
+                    }`}
                 >
                   Sign in
                 </button>
                 <button
                   type="button"
                   onClick={() => { setAuthMode("register"); setError(""); setSuccessMsg(""); }}
-                  className={`flex-1 py-2 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer ${
-                    authMode === "register"
-                      ? "bg-white text-gray-950 shadow-xs"
-                      : "text-gray-500 hover:text-gray-900"
-                  }`}
+                  className={`flex-1 py-2 text-xs font-bold rounded-full transition-all duration-200 cursor-pointer ${authMode === "register"
+                    ? "bg-white text-gray-950 shadow-xs"
+                    : "text-gray-500 hover:text-gray-900"
+                    }`}
                 >
                   Register
                 </button>
@@ -1457,10 +1482,10 @@ function LoginScreen({
                 className="w-full py-2.5 px-4 rounded-full border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-800 flex items-center justify-center gap-2.5 transition-colors mb-3.5 shadow-2xs cursor-pointer"
               >
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z"/>
-                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z"/>
-                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z"/>
-                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/>
+                  <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.665-5.17 3.665-9.17z" />
+                  <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.25v3.15C3.26 21.36 7.33 24 12 24z" />
+                  <path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.25C.45 8.18 0 9.99 0 12s.45 3.82 1.25 5.42l4.03-3.15z" />
+                  <path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.33 0 3.26 2.64 1.25 6.58l4.03 3.15c.95-2.83 3.6-4.98 6.72-4.98z" />
                 </svg>
                 <span>Continue with Google</span>
               </button>
@@ -1489,11 +1514,10 @@ function LoginScreen({
                       <button
                         type="button"
                         onClick={() => { setSignInRole("user"); setError(""); }}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                          signInRole === "user"
-                            ? "bg-white text-emerald-800 shadow-sm border border-emerald-600/30"
-                            : "text-gray-600 hover:text-gray-900"
-                        }`}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${signInRole === "user"
+                          ? "bg-white text-emerald-800 shadow-sm border border-emerald-600/30"
+                          : "text-gray-600 hover:text-gray-900"
+                          }`}
                       >
                         <User size={14} className={signInRole === "user" ? "text-[#0d7d4d]" : "text-gray-500"} />
                         <span>Resident</span>
@@ -1502,11 +1526,10 @@ function LoginScreen({
                       <button
                         type="button"
                         onClick={() => { setSignInRole("admin"); setError(""); }}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                          signInRole === "admin"
-                            ? "bg-white text-purple-800 shadow-sm border border-purple-600/30"
-                            : "text-gray-600 hover:text-gray-900"
-                        }`}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${signInRole === "admin"
+                          ? "bg-white text-purple-800 shadow-sm border border-purple-600/30"
+                          : "text-gray-600 hover:text-gray-900"
+                          }`}
                       >
                         <ShieldCheck size={14} className={signInRole === "admin" ? "text-purple-600" : "text-gray-500"} />
                         <span>Admin</span>
@@ -1515,11 +1538,10 @@ function LoginScreen({
                       <button
                         type="button"
                         onClick={() => { setSignInRole("superadmin"); setError(""); }}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${
-                          signInRole === "superadmin"
-                            ? "bg-white text-red-800 shadow-sm border border-red-600/30"
-                            : "text-gray-600 hover:text-gray-900"
-                        }`}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${signInRole === "superadmin"
+                          ? "bg-white text-red-800 shadow-sm border border-red-600/30"
+                          : "text-gray-600 hover:text-gray-900"
+                          }`}
                       >
                         <Crown size={14} className={signInRole === "superadmin" ? "text-red-500" : "text-gray-500"} />
                         <span>Super Admin</span>
@@ -1555,9 +1577,9 @@ function LoginScreen({
                         placeholder="••••••••"
                         className="w-full bg-[#f8f9f7] border border-gray-200/90 rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#0d7d4d] focus:bg-white transition-all shadow-2xs pr-10"
                       />
-                      <button 
-                        type="button" 
-                        onClick={() => setShowPw(p => !p)} 
+                      <button
+                        type="button"
+                        onClick={() => setShowPw(p => !p)}
                         className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
                       >
                         {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -1584,13 +1606,12 @@ function LoginScreen({
                   <button
                     onClick={handleCredentialsSubmit}
                     disabled={isSupabaseSending}
-                    className={`w-full mt-2 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-full text-xs shadow-md hover:shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 ${
-                      signInRole === "superadmin"
-                        ? "bg-gray-900 hover:bg-black"
-                        : signInRole === "admin"
+                    className={`w-full mt-2 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-full text-xs shadow-md hover:shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 ${signInRole === "superadmin"
+                      ? "bg-gray-900 hover:bg-black"
+                      : signInRole === "admin"
                         ? "bg-purple-700 hover:bg-purple-800"
                         : "bg-[#0d7d4d] hover:bg-[#0b6a41]"
-                    }`}
+                      }`}
                   >
                     {isSupabaseSending ? (
                       <>
@@ -1643,9 +1664,9 @@ function LoginScreen({
                         placeholder="Create a password"
                         className="w-full bg-[#f8f9f7] border border-gray-200/90 rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#0d7d4d] focus:bg-white transition-all shadow-2xs pr-10"
                       />
-                      <button 
-                        type="button" 
-                        onClick={() => setShowPw(p => !p)} 
+                      <button
+                        type="button"
+                        onClick={() => setShowPw(p => !p)}
                         className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
                       >
                         {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -1675,8 +1696,8 @@ function LoginScreen({
                 {authMode === "signin" ? (
                   <>
                     <span>Don't have an account? </span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => { setAuthMode("register"); setError(""); setSuccessMsg(""); }}
                       className="font-bold text-gray-950 hover:underline cursor-pointer"
                     >
@@ -1686,8 +1707,8 @@ function LoginScreen({
                 ) : (
                   <>
                     <span>Already have an account? </span>
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       onClick={() => { setAuthMode("signin"); setError(""); setSuccessMsg(""); }}
                       className="font-bold text-gray-950 hover:underline cursor-pointer"
                     >
@@ -1832,6 +1853,7 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
   const [mod, setMod] = useState<UserModule>("myDashboard");
   const [signedUp, setSignedUp] = useState<string[]>(["SES-001", "SES-004"]);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [withdrawTarget, setWithdrawTarget] = useState<WithdrawTarget | null>(null);
   const [applyTarget, setApplyTarget] = useState<ApplyTarget | null>(null);
   const [certRecord, setCertRecord] = useState<AttendanceRecord | null>(null);
@@ -1924,8 +1946,8 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex" style={{ fontFamily: "'DM Sans', 'Barlow', sans-serif" }}>
-      {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col" style={{ minHeight: "100vh" }}>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden md:flex w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
         <div className="px-4 py-5 border-b border-sidebar-border">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0">
@@ -1937,7 +1959,7 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
             </div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-2">Navigation</div>
           {USER_NAV.map((item, i) => {
             const Icon = item.icon;
@@ -1946,7 +1968,7 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
               <motion.button key={item.id} onClick={() => setMod(item.id)}
                 initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05, duration: 0.25 }}
                 whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}>
+                className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}>
                 <Icon size={15} className={active ? "text-primary" : "text-current"} />
                 <span>{item.label}</span>
                 {active && <motion.span layoutId="user-nav-indicator" className="ml-auto"><ChevronRight size={12} className="text-primary" /></motion.span>}
@@ -1967,9 +1989,89 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
             <div className="text-xs font-semibold text-foreground truncate">{auth.name}</div>
             <div className="text-[12px] font-mono text-muted-foreground">Participant</div>
           </div>
-          <motion.button onClick={() => setShowLogoutModal(true)} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="text-muted-foreground hover:text-red-400 transition-colors"><LogOut size={15} /></motion.button>
+          <motion.button onClick={() => setShowLogoutModal(true)} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="text-muted-foreground hover:text-red-400 transition-colors cursor-pointer"><LogOut size={15} /></motion.button>
         </div>
       </aside>
+
+      {/* Mobile Sliding Navigation Drawer */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <div className="fixed inset-0 z-50 md:hidden flex">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <motion.aside
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="relative w-72 max-w-[80vw] bg-sidebar border-r border-sidebar-border flex flex-col h-full z-10 shadow-2xl"
+            >
+              <div className="px-4 py-4 border-b border-sidebar-border flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0">
+                    <img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-bold font-display tracking-widest text-foreground uppercase leading-none">DPTSS</div>
+                    <div className="text-[11px] font-mono text-muted-foreground mt-0.5 leading-none">Participant Portal</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMobileNavOpen(false)}
+                  className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-2">Navigation</div>
+                {USER_NAV.map((item) => {
+                  const Icon = item.icon;
+                  const active = mod === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { setMod(item.id); setMobileNavOpen(false); }}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${
+                        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                      }`}
+                    >
+                      <Icon size={16} className={active ? "text-primary" : "text-current"} />
+                      <span>{item.label}</span>
+                      {active && <ChevronRight size={14} className="ml-auto text-primary" />}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="px-3 pb-3">
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                  <div className="text-[11px] font-mono text-blue-400 uppercase tracking-widest mb-1">Access Level</div>
+                  <div className="text-xs font-semibold text-foreground">Participant</div>
+                  <div className="text-[12px] text-muted-foreground">{auth.dept}</div>
+                </div>
+              </div>
+              <div className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2.5">
+                <AvatarCircle initials={auth.avatar} color="bg-blue-500/20" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-foreground truncate">{auth.name}</div>
+                  <div className="text-[12px] font-mono text-muted-foreground">Participant</div>
+                </div>
+                <button
+                  onClick={() => { setMobileNavOpen(false); setShowLogoutModal(true); }}
+                  className="text-muted-foreground hover:text-red-400 p-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
 
       {showLogoutModal && (
         <LogoutConfirmModal auth={auth} onConfirm={onLogout} onCancel={() => setShowLogoutModal(false)} />
@@ -2003,18 +2105,30 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
       )}
 
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 border-b border-border flex items-center justify-between px-6 bg-card/60 backdrop-blur-md flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-            <span>DPTSS</span><ChevronRight size={12} /><span className="text-foreground">{USER_NAV.find(n => n.id === mod)?.label}</span>
+        <header className="h-14 border-b border-border flex items-center justify-between px-3.5 sm:px-6 bg-card/60 backdrop-blur-md flex-shrink-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono min-w-0">
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="md:hidden p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              aria-label="Open navigation menu"
+            >
+              <Menu size={18} />
+            </button>
+            <span className="hidden sm:inline">DPTSS</span>
+            <ChevronRight size={12} className="hidden sm:inline" />
+            <span className="text-foreground font-semibold truncate">{USER_NAV.find(n => n.id === mod)?.label}</span>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-mono text-green-400"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />ONLINE</div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden xs:flex items-center gap-1.5 text-xs font-mono text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span className="hidden sm:inline">ONLINE</span>
+            </div>
             <DarkModeToggle />
             <NotificationBell role={auth.role} />
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <AnimatePresence mode="wait">
             <motion.div key={mod} variants={pageTransition} initial="hidden" animate="show" exit="exit">
               {mod === "myDashboard" && (
@@ -2140,14 +2254,20 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                     ) : (
                       <div className="space-y-2">
                         {myAttendance.map(r => (
-                          <div key={r.id} className="bg-card border border-border rounded-lg p-4 opacity-90">
-                            <div className="flex items-start gap-4">
-                              <div className="w-12 h-12 rounded-lg bg-secondary flex flex-col items-center justify-center flex-shrink-0">
-                                <div className="text-xs font-mono text-muted-foreground">{new Date(r.date).toLocaleDateString(undefined, { month: "short" })}</div>
-                                <div className="text-lg font-bold font-display text-muted-foreground leading-none">{new Date(r.date).getDate()}</div>
+                          <div key={r.id} className="bg-card border border-border rounded-lg p-3.5 sm:p-4 opacity-90">
+                            <div className="flex flex-col sm:flex-row sm:items-start gap-3 sm:gap-4">
+                              <div className="flex items-center gap-3 sm:block">
+                                <div className="w-12 h-12 rounded-lg bg-secondary flex flex-col items-center justify-center flex-shrink-0">
+                                  <div className="text-xs font-mono text-muted-foreground">{new Date(r.date).toLocaleDateString(undefined, { month: "short" })}</div>
+                                  <div className="text-lg font-bold font-display text-muted-foreground leading-none">{new Date(r.date).getDate()}</div>
+                                </div>
+                                <div className="sm:hidden flex-1 min-w-0">
+                                  <div className="text-sm font-semibold text-foreground truncate">{r.program}</div>
+                                  <Badge status={r.status}>{r.status}</Badge>
+                                </div>
                               </div>
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
+                              <div className="flex-1 min-w-0">
+                                <div className="hidden sm:flex items-center gap-2 mb-1">
                                   <h3 className="text-sm font-semibold text-foreground">{r.program}</h3>
                                   <Badge status={r.status}>{r.status}</Badge>
                                 </div>
@@ -2156,7 +2276,7 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                                   {typeof r.score === "number" && <span className="flex items-center gap-1"><Star size={12} />Score: {r.score}%</span>}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex flex-wrap items-center gap-2 pt-1 sm:pt-0 sm:self-start">
                                 {r.status === "Completed" && (
                                   <button onClick={() => setCertRecord(r)} className="text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md bg-secondary transition-colors flex items-center gap-1.5"><Award size={13} />Certificate</button>
                                 )}
@@ -2302,20 +2422,19 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                                 joined
                                   ? setWithdrawTarget({ id: d.id, name: d.name, date: d.date })
                                   : setApplyTarget({
-                                      id: d.id,
-                                      name: d.name,
-                                      date: d.date,
-                                      slots: d.slots,
-                                      type: d.type,
-                                      level: d.level,
-                                      desc: d.desc,
-                                    })
+                                    id: d.id,
+                                    name: d.name,
+                                    date: d.date,
+                                    slots: d.slots,
+                                    type: d.type,
+                                    level: d.level,
+                                    desc: d.desc,
+                                  })
                               }
-                              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors whitespace-nowrap cursor-pointer ${
-                                joined
-                                  ? "bg-secondary text-muted-foreground hover:text-red-400"
-                                  : "bg-primary text-primary-foreground hover:bg-primary/90"
-                              }`}
+                              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors whitespace-nowrap cursor-pointer ${joined
+                                ? "bg-secondary text-muted-foreground hover:text-red-400"
+                                : "bg-primary text-primary-foreground hover:bg-primary/90"
+                                }`}
                             >
                               {joined ? <><X size={13} />Withdraw</> : <><Plus size={13} />Apply</>}
                             </button>
@@ -2869,7 +2988,7 @@ function ViewProgramModal({ program, onEdit, onClose }: { program: CurriculumPro
             </div>
           )}
 
-          <div className="grid grid-cols-3 gap-3 p-3 rounded-lg bg-secondary/30 border border-border">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 rounded-lg bg-secondary/30 border border-border">
             <ProgramDetailRow label="Modules" value={program.modules} />
             <ProgramDetailRow label="Duration" value={program.duration} />
             <ProgramDetailRow label="Passing Score" value={program.passingScore ? `${program.passingScore}%` : undefined} />
@@ -2877,7 +2996,7 @@ function ViewProgramModal({ program, onEdit, onClose }: { program: CurriculumPro
             <ProgramDetailRow label="Estimated Cost" value={program.estimatedCost !== undefined ? `₱${program.estimatedCost.toLocaleString()}` : undefined} />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <ProgramDetailRow label="Target Audience" value={program.targetAudience} />
             <ProgramDetailRow label="Prerequisites" value={program.prerequisites} />
             <ProgramDetailRow label="Training Assessor" value={program.assessor} />
@@ -3502,24 +3621,26 @@ function TrainingModule() {
       )}
       {tab === "schedule" && (
         <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-border bg-secondary/40">{["ID", "Course", "Date", "Location", "Trainer", "Enrollment", "Status", ""].map(h => <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>)}</tr></thead>
-            <tbody>{allSessions.map((s, i) => {
-              const pct = Math.round(s.enrolled / s.capacity * 100); return (<tr key={s.id} className={`border-b border-border hover:bg-secondary/30 ${i === allSessions.length - 1 ? "border-b-0" : ""}`}><td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.id}</td><td className="px-4 py-3 text-xs font-semibold text-foreground">{s.course}</td><td className="px-4 py-3"><div className="text-xs font-mono text-foreground">{s.date}</div><div className="text-[12px] font-mono text-muted-foreground">{s.time}</div></td><td className="px-4 py-3 text-xs text-muted-foreground">{s.location}</td><td className="px-4 py-3 text-xs text-muted-foreground">{s.trainer}</td><td className="px-4 py-3 min-w-[120px]"><div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div><span className="text-[12px] font-mono text-muted-foreground">{s.enrolled}/{s.capacity}</span></div></td><td className="px-4 py-3"><Badge status={s.status}>{s.status}</Badge></td><td className="px-4 py-3">
-                <DropdownMenu items={[
-                  { label: "View Details", icon: Eye, onClick: () => setViewingSession(s as CurriculumSession) },
-                  { label: "Edit Session", icon: Edit2, onClick: () => setEditingSession(s as CurriculumSession) },
-                  { label: "Duplicate Session", icon: PlusCircle, onClick: () => { const { source: _src, ...base } = s as CurriculumSession; app.createSession({ ...base, id: "", status: "Scheduled", enrolled: 0 }); app.addNotification({ type: "Session", subject: `Duplicated session: ${s.course}`, status: "Sent" }); } },
-                  ...(s.status !== "Cancelled" ? [{
-                    label: "Cancel Session", icon: XCircle, danger: true, onClick: () => {
-                      if (s.source === "Seed Catalog") { setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Cancelled" } : x)); app.addNotification({ type: "Session", subject: `Session ${s.id} cancelled`, status: "Sent" }); }
-                      else { app.cancelSession(s.id); }
-                    }
-                  }] : []),
-                ]} />
-              </td></tr>);
-            })}</tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[700px]">
+              <thead><tr className="border-b border-border bg-secondary/40">{["ID", "Course", "Date", "Location", "Trainer", "Enrollment", "Status", ""].map(h => <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>)}</tr></thead>
+              <tbody>{allSessions.map((s, i) => {
+                const pct = Math.round(s.enrolled / s.capacity * 100); return (<tr key={s.id} className={`border-b border-border hover:bg-secondary/30 ${i === allSessions.length - 1 ? "border-b-0" : ""}`}><td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.id}</td><td className="px-4 py-3 text-xs font-semibold text-foreground">{s.course}</td><td className="px-4 py-3"><div className="text-xs font-mono text-foreground">{s.date}</div><div className="text-[12px] font-mono text-muted-foreground">{s.time}</div></td><td className="px-4 py-3 text-xs text-muted-foreground">{s.location}</td><td className="px-4 py-3 text-xs text-muted-foreground">{s.trainer}</td><td className="px-4 py-3 min-w-[120px]"><div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div><span className="text-[12px] font-mono text-muted-foreground">{s.enrolled}/{s.capacity}</span></div></td><td className="px-4 py-3"><Badge status={s.status}>{s.status}</Badge></td><td className="px-4 py-3">
+                  <DropdownMenu items={[
+                    { label: "View Details", icon: Eye, onClick: () => setViewingSession(s as CurriculumSession) },
+                    { label: "Edit Session", icon: Edit2, onClick: () => setEditingSession(s as CurriculumSession) },
+                    { label: "Duplicate Session", icon: PlusCircle, onClick: () => { const { source: _src, ...base } = s as CurriculumSession; app.createSession({ ...base, id: "", status: "Scheduled", enrolled: 0 }); app.addNotification({ type: "Session", subject: `Duplicated session: ${s.course}`, status: "Sent" }); } },
+                    ...(s.status !== "Cancelled" ? [{
+                      label: "Cancel Session", icon: XCircle, danger: true, onClick: () => {
+                        if (s.source === "Seed Catalog") { setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Cancelled" } : x)); app.addNotification({ type: "Session", subject: `Session ${s.id} cancelled`, status: "Sent" }); }
+                        else { app.cancelSession(s.id); }
+                      }
+                    }] : []),
+                  ]} />
+                </td></tr>);
+              })}</tbody>
+            </table>
+          </div>
         </div>
       )}
       {viewingResource && (
@@ -5306,13 +5427,13 @@ function UserManagement() {
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="relative flex-1 max-w-full sm:max-w-xs">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name, email, department..."
             className="w-full bg-input-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5">
           {(["all", "superadmin", "admin", "user"] as const).map(f => (
             <button key={f} onClick={() => setFilter(f)}
               className={`px-3 py-1.5 text-xs font-mono rounded-md transition-colors ${filter === f ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
@@ -5323,61 +5444,63 @@ function UserManagement() {
       </div>
 
       <div className="bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-secondary/40">
-              {["User", "Contact", "Role", "Department", "Status", "Last Login", "Actions"].map(h => (
-                <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((u, i) => (
-              <motion.tr key={u.id} custom={i} variants={fadeIn} initial="hidden" animate="show"
-                onClick={() => setDetailUser(u)}
-                className={`border-b border-border hover:bg-secondary/30 transition-colors cursor-pointer ${i === filtered.length - 1 ? "border-b-0" : ""} ${u.status === "Suspended" ? "opacity-60" : ""}`}>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2.5">
-                    <AvatarCircle initials={u.avatar} color={u.role === "superadmin" ? "bg-primary/20" : u.role === "admin" ? "bg-purple-500/20" : "bg-blue-500/20"} />
-                    <div className="min-w-0">
-                      <div className="text-xs font-semibold text-foreground truncate">{u.name}</div>
-                      <div className="text-[11px] font-mono text-muted-foreground">{u.id} · {u.title}</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead>
+              <tr className="border-b border-border bg-secondary/40">
+                {["User", "Contact", "Role", "Department", "Status", "Last Login", "Actions"].map(h => (
+                  <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((u, i) => (
+                <motion.tr key={u.id} custom={i} variants={fadeIn} initial="hidden" animate="show"
+                  onClick={() => setDetailUser(u)}
+                  className={`border-b border-border hover:bg-secondary/30 transition-colors cursor-pointer ${i === filtered.length - 1 ? "border-b-0" : ""} ${u.status === "Suspended" ? "opacity-60" : ""}`}>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2.5">
+                      <AvatarCircle initials={u.avatar} color={u.role === "superadmin" ? "bg-primary/20" : u.role === "admin" ? "bg-purple-500/20" : "bg-blue-500/20"} />
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-foreground truncate">{u.name}</div>
+                        <div className="text-[11px] font-mono text-muted-foreground">{u.id} · {u.title}</div>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="text-xs font-mono text-muted-foreground">{u.email}</div>
-                  <div className="text-[11px] font-mono text-muted-foreground">{u.phone}</div>
-                </td>
-                <td className="px-4 py-3">
-                  <span className={`text-[12px] font-mono font-bold px-2 py-0.5 rounded border ${roleColors[u.role]}`}>{roleLabels[u.role]}</span>
-                </td>
-                <td className="px-4 py-3 text-xs text-muted-foreground">{u.dept}</td>
-                <td className="px-4 py-3"><Badge status={u.status}>{u.status}</Badge></td>
-                <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{u.lastLogin}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
-                    <button onClick={() => setDetailUser(u)}
-                      title="View Full Profile"
-                      className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-secondary">
-                      <Eye size={14} />
-                    </button>
-                    <button onClick={() => toggleStatus(u.id)}
-                      title={u.status === "Active" ? "Suspend" : "Reactivate"}
-                      className={`transition-colors p-1 rounded hover:bg-secondary ${u.status === "Active" ? "text-muted-foreground hover:text-red-400" : "text-muted-foreground hover:text-green-400"}`}>
-                      {u.status === "Active" ? <UserX size={14} /> : <UserCheck size={14} />}
-                    </button>
-                    <button onClick={() => app.addNotification({ type: "UserMgmt", subject: `Password reset sent to ${u.name}`, status: "Sent" })}
-                      title="Reset Password" className="text-muted-foreground hover:text-yellow-400 transition-colors p-1 rounded hover:bg-secondary"><RefreshCw size={14} /></button>
-                  </div>
-                </td>
-              </motion.tr>
-            ))}
-            {filtered.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-10 text-center text-xs text-muted-foreground">No users match your search or filter.</td></tr>
-            )}
-          </tbody>
-        </table>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="text-xs font-mono text-muted-foreground">{u.email}</div>
+                    <div className="text-[11px] font-mono text-muted-foreground">{u.phone}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`text-[12px] font-mono font-bold px-2 py-0.5 rounded border ${roleColors[u.role]}`}>{roleLabels[u.role]}</span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground">{u.dept}</td>
+                  <td className="px-4 py-3"><Badge status={u.status}>{u.status}</Badge></td>
+                  <td className="px-4 py-3 text-xs font-mono text-muted-foreground">{u.lastLogin}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                      <button onClick={() => setDetailUser(u)}
+                        title="View Full Profile"
+                        className="text-muted-foreground hover:text-primary transition-colors p-1 rounded hover:bg-secondary">
+                        <Eye size={14} />
+                      </button>
+                      <button onClick={() => toggleStatus(u.id)}
+                        title={u.status === "Active" ? "Suspend" : "Reactivate"}
+                        className={`transition-colors p-1 rounded hover:bg-secondary ${u.status === "Active" ? "text-muted-foreground hover:text-red-400" : "text-muted-foreground hover:text-green-400"}`}>
+                        {u.status === "Active" ? <UserX size={14} /> : <UserCheck size={14} />}
+                      </button>
+                      <button onClick={() => app.addNotification({ type: "UserMgmt", subject: `Password reset sent to ${u.name}`, status: "Sent" })}
+                        title="Reset Password" className="text-muted-foreground hover:text-yellow-400 transition-colors p-1 rounded hover:bg-secondary"><RefreshCw size={14} /></button>
+                    </div>
+                  </td>
+                </motion.tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-xs text-muted-foreground">No users match your search or filter.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {detailUser && (
@@ -5655,6 +5778,7 @@ function SystemSettings() {
 function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }) {
   const [mod, setMod] = useState<AdminModule>("dashboard");
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const ADMIN_NAV = [
     { id: "dashboard" as AdminModule, label: "Command Overview", icon: Activity },
@@ -5667,16 +5791,17 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 
   return (
     <div className="min-h-screen bg-background text-foreground flex" style={{ fontFamily: "'DM Sans', 'Barlow', sans-serif" }}>
-      <aside className="w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col" style={{ minHeight: "100vh" }}>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden md:flex w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
         <div className="px-4 py-5 border-b border-sidebar-border">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0"><img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" /></div>
             <div><div className="text-[13px] font-bold font-display tracking-widest text-foreground uppercase leading-none">DPTSS</div><div className="text-[11px] font-mono text-muted-foreground mt-0.5 leading-none">Admin Console</div></div>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-2">Modules</div>
-          {ADMIN_NAV.map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={active ? "text-primary" : "text-current"} /><span>{item.label}</span>{active && <ChevronRight size={12} className="ml-auto text-primary" />}</motion.button>); })}
+          {ADMIN_NAV.map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={active ? "text-primary" : "text-current"} /><span>{item.label}</span>{active && <ChevronRight size={12} className="ml-auto text-primary" />}</motion.button>); })}
         </nav>
         <div className="px-3 pb-3">
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">
@@ -5688,18 +5813,117 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
         <div className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2.5">
           <AvatarCircle initials={auth.avatar} color="bg-purple-500/20" />
           <div className="flex-1 min-w-0"><div className="text-xs font-semibold text-foreground truncate">{auth.name}</div><div className="text-[12px] font-mono text-muted-foreground">Admin</div></div>
-          <motion.button onClick={() => setShowLogoutModal(true)} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="text-muted-foreground hover:text-red-400 transition-colors"><LogOut size={15} /></motion.button>
+          <motion.button onClick={() => setShowLogoutModal(true)} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="text-muted-foreground hover:text-red-400 transition-colors cursor-pointer"><LogOut size={15} /></motion.button>
         </div>
       </aside>
+
+      {/* Mobile Sliding Navigation Drawer */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <div className="fixed inset-0 z-50 md:hidden flex">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <motion.aside
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="relative w-72 max-w-[80vw] bg-sidebar border-r border-sidebar-border flex flex-col h-full z-10 shadow-2xl"
+            >
+              <div className="px-4 py-4 border-b border-sidebar-border flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0">
+                    <img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-bold font-display tracking-widest text-foreground uppercase leading-none">DPTSS</div>
+                    <div className="text-[11px] font-mono text-muted-foreground mt-0.5 leading-none">Admin Console</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMobileNavOpen(false)}
+                  className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+                <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-2">Modules</div>
+                {ADMIN_NAV.map((item) => {
+                  const Icon = item.icon;
+                  const active = mod === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { setMod(item.id); setMobileNavOpen(false); }}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${
+                        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                      }`}
+                    >
+                      <Icon size={16} className={active ? "text-primary" : "text-current"} />
+                      <span>{item.label}</span>
+                      {active && <ChevronRight size={14} className="ml-auto text-primary" />}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div className="px-3 pb-3">
+                <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">
+                  <div className="text-[11px] font-mono text-purple-400 uppercase tracking-widest mb-1">Access Level</div>
+                  <div className="text-xs font-semibold text-foreground">Administrator</div>
+                  <div className="text-[12px] text-muted-foreground">{auth.dept}</div>
+                </div>
+              </div>
+              <div className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2.5">
+                <AvatarCircle initials={auth.avatar} color="bg-purple-500/20" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-foreground truncate">{auth.name}</div>
+                  <div className="text-[12px] font-mono text-muted-foreground">Admin</div>
+                </div>
+                <button
+                  onClick={() => { setMobileNavOpen(false); setShowLogoutModal(true); }}
+                  className="text-muted-foreground hover:text-red-400 p-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            </motion.aside>
+          </div>
+        )}
+      </AnimatePresence>
+
       {showLogoutModal && (
         <LogoutConfirmModal auth={auth} onConfirm={onLogout} onCancel={() => setShowLogoutModal(false)} />
       )}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 border-b border-border flex items-center justify-between px-6 bg-card/60 backdrop-blur-md flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono"><span>DPTSS</span><ChevronRight size={12} /><span className="text-foreground">{ADMIN_NAV.find(n => n.id === mod)?.label}</span></div>
-          <div className="flex items-center gap-3"><div className="flex items-center gap-1.5 text-xs font-mono text-green-400"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />SYS OPERATIONAL</div><DarkModeToggle /><NotificationBell role={auth.role} /></div>
+        <header className="h-14 border-b border-border flex items-center justify-between px-3.5 sm:px-6 bg-card/60 backdrop-blur-md flex-shrink-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono min-w-0">
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="md:hidden p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              aria-label="Open navigation menu"
+            >
+              <Menu size={18} />
+            </button>
+            <span className="hidden sm:inline">DPTSS</span>
+            <ChevronRight size={12} className="hidden sm:inline" />
+            <span className="text-foreground font-semibold truncate">{ADMIN_NAV.find(n => n.id === mod)?.label}</span>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden xs:flex items-center gap-1.5 text-xs font-mono text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span className="hidden sm:inline">SYS OPERATIONAL</span>
+            </div>
+            <DarkModeToggle />
+            <NotificationBell role={auth.role} />
+          </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <AnimatePresence mode="wait">
             <motion.div key={mod} variants={pageTransition} initial="hidden" animate="show" exit="exit">
               {mod === "dashboard" && <AdminDashboard />}
@@ -5719,6 +5943,7 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }) {
   const [mod, setMod] = useState<SuperAdminModule>("dashboard");
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   const SA_NAV = [
     { id: "dashboard" as SuperAdminModule, label: "Command Overview", icon: Activity, group: "Operations" },
@@ -5735,7 +5960,8 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
 
   return (
     <div className="min-h-screen bg-background text-foreground flex" style={{ fontFamily: "'DM Sans', 'Barlow', sans-serif" }}>
-      <aside className="w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex flex-col" style={{ minHeight: "100vh" }}>
+      {/* Desktop Persistent Sidebar */}
+      <aside className="hidden md:flex w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
         <div className="px-4 py-5 border-b border-sidebar-border">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0"><img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" /></div>
@@ -5747,7 +5973,7 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
             <div key={g}>
               <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-1.5">{g}</div>
               <div className="space-y-0.5">
-                {SA_NAV.filter(n => n.group === g).map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium ${active ? `bg-sidebar-accent text-foreground` : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={active ? "text-primary" : "text-current"} /><span>{item.label}</span>{active && <ChevronRight size={12} className="ml-auto text-primary" />}</motion.button>); })}
+                {SA_NAV.filter(n => n.group === g).map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? `bg-sidebar-accent text-foreground` : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={active ? "text-primary" : "text-current"} /><span>{item.label}</span>{active && <ChevronRight size={12} className="ml-auto text-primary" />}</motion.button>); })}
               </div>
             </div>
           ))}
@@ -5762,27 +5988,130 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
         <div className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2.5">
           <AvatarCircle initials={auth.avatar} color="bg-primary/20" />
           <div className="flex-1 min-w-0"><div className="text-xs font-semibold text-foreground truncate">{auth.name}</div><div className="text-[12px] font-mono text-primary">Super Admin</div></div>
-          <motion.button onClick={() => setShowLogoutModal(true)} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="text-muted-foreground hover:text-red-400 transition-colors"><LogOut size={15} /></motion.button>
+          <motion.button onClick={() => setShowLogoutModal(true)} whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }} className="text-muted-foreground hover:text-red-400 transition-colors cursor-pointer"><LogOut size={15} /></motion.button>
         </div>
-        {showLogoutModal && (
-          <LogoutConfirmModal auth={auth} onConfirm={onLogout} onCancel={() => setShowLogoutModal(false)} />
-        )}
       </aside>
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <header className="h-14 border-b border-border flex items-center justify-between px-6 bg-card/60 backdrop-blur-md flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
-            <span>DPTSS</span><ChevronRight size={12} />
-            <span className={`${["usermgmt", "settings"].includes(mod) ? "text-primary" : "text-foreground"}`}>{SA_NAV.find(n => n.id === mod)?.label}</span>
+      {/* Mobile Sliding Navigation Drawer */}
+      <AnimatePresence>
+        {mobileNavOpen && (
+          <div className="fixed inset-0 z-50 md:hidden flex">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+              onClick={() => setMobileNavOpen(false)}
+            />
+            <motion.aside
+              initial={{ x: "-100%" }}
+              animate={{ x: 0 }}
+              exit={{ x: "-100%" }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="relative w-72 max-w-[80vw] bg-sidebar border-r border-sidebar-border flex flex-col h-full z-10 shadow-2xl"
+            >
+              <div className="px-4 py-4 border-b border-sidebar-border flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0">
+                    <img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" />
+                  </div>
+                  <div>
+                    <div className="text-[13px] font-bold font-display tracking-widest text-foreground uppercase leading-none">DPTSS</div>
+                    <div className="text-[11px] font-mono text-muted-foreground mt-0.5 leading-none">Super Admin</div>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setMobileNavOpen(false)}
+                  className="p-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent cursor-pointer"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
+                {groups.map(g => (
+                  <div key={g}>
+                    <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-1.5">{g}</div>
+                    <div className="space-y-1">
+                      {SA_NAV.filter(n => n.group === g).map((item) => {
+                        const Icon = item.icon;
+                        const active = mod === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => { setMod(item.id); setMobileNavOpen(false); }}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${
+                              active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
+                            }`}
+                          >
+                            <Icon size={16} className={active ? "text-primary" : "text-current"} />
+                            <span>{item.label}</span>
+                            {active && <ChevronRight size={14} className="ml-auto text-primary" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </nav>
+              <div className="px-3 pb-3">
+                <div className="bg-primary/10 border border-primary/20 rounded-lg p-3">
+                  <div className="text-[11px] font-mono text-primary uppercase tracking-widest mb-1">Access Level</div>
+                  <div className="text-xs font-semibold text-foreground">Super Administrator</div>
+                  <div className="text-[12px] text-muted-foreground">Full system access</div>
+                </div>
+              </div>
+              <div className="px-4 py-3 border-t border-sidebar-border flex items-center gap-2.5">
+                <AvatarCircle initials={auth.avatar} color="bg-primary/20" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-foreground truncate">{auth.name}</div>
+                  <div className="text-[12px] font-mono text-primary">Super Admin</div>
+                </div>
+                <button
+                  onClick={() => { setMobileNavOpen(false); setShowLogoutModal(true); }}
+                  className="text-muted-foreground hover:text-red-400 p-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            </motion.aside>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-xs font-mono text-primary border border-primary/20 bg-primary/10 px-2 py-0.5 rounded"><ShieldCheck size={12} />SUPER ADMIN</div>
-            <div className="flex items-center gap-1.5 text-xs font-mono text-green-400"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />SYS OPERATIONAL</div>
+        )}
+      </AnimatePresence>
+
+      {showLogoutModal && (
+        <LogoutConfirmModal auth={auth} onConfirm={onLogout} onCancel={() => setShowLogoutModal(false)} />
+      )}
+
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <header className="h-14 border-b border-border flex items-center justify-between px-3.5 sm:px-6 bg-card/60 backdrop-blur-md flex-shrink-0">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono min-w-0">
+            <button
+              onClick={() => setMobileNavOpen(true)}
+              className="md:hidden p-1.5 -ml-1 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors cursor-pointer"
+              aria-label="Open navigation menu"
+            >
+              <Menu size={18} />
+            </button>
+            <span className="hidden sm:inline">DPTSS</span>
+            <ChevronRight size={12} className="hidden sm:inline" />
+            <span className={`truncate font-semibold ${["usermgmt", "settings"].includes(mod) ? "text-primary" : "text-foreground"}`}>
+              {SA_NAV.find(n => n.id === mod)?.label}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="hidden xs:flex items-center gap-1.5 text-xs font-mono text-primary border border-primary/20 bg-primary/10 px-2 py-0.5 rounded">
+              <ShieldCheck size={12} />
+              <span className="hidden sm:inline">SUPER ADMIN</span>
+            </div>
+            <div className="hidden md:flex items-center gap-1.5 text-xs font-mono text-green-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span>SYS OPERATIONAL</span>
+            </div>
             <DarkModeToggle />
             <NotificationBell role={auth.role} />
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <AnimatePresence mode="wait">
             <motion.div key={mod} variants={pageTransition} initial="hidden" animate="show" exit="exit">
               {mod === "dashboard" && <AdminDashboard />}
@@ -5829,17 +6158,17 @@ function AppContent() {
     if (view === "landing") {
       return (
         <>
-          <LandingPage 
+          <LandingPage
             onLogin={() => {
               setAuthMode("signin");
               setView("login");
-            }} 
+            }}
             onRegister={() => {
               setAuthMode("register");
               setView("login");
             }}
-            logoImg="/culiat_logo.jpg" 
-            hqImg="/culiat_hq.jpg" 
+            logoImg="/culiat_logo.jpg"
+            hqImg="/culiat_hq.jpg"
           />
           <ToastContainer />
         </>

@@ -9,7 +9,9 @@ import {
   Check,
   ChevronRight,
   ArrowRight,
-  ArrowUp
+  ArrowUp,
+  Menu,
+  X
 } from "lucide-react";
 import { LocationMap } from "./LocationMap";
 import { Button } from "../../components/ui/button";
@@ -29,6 +31,7 @@ export function LandingPage({
 }: LandingPageProps) {
   const [scrollProgress, setScrollProgress] = useState(0);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Scroll listener for top reading progress bar and back-to-top button
   useEffect(() => {
@@ -131,33 +134,34 @@ export function LandingPage({
 
         <div className="relative z-10 flex-1 flex flex-col">
           {/* Top Navbar */}
-          <nav className="sticky top-0 z-50 w-full px-6 lg:px-12 h-20 flex items-center justify-between border-b border-white/10 bg-[#061c10]/85 backdrop-blur-xl transition-all">
-            <div className="flex items-center gap-3.5">
+          <nav className="sticky top-0 z-50 w-full px-4 sm:px-6 lg:px-12 h-20 flex items-center justify-between border-b border-white/10 bg-[#061c10]/90 backdrop-blur-xl transition-all">
+            <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0">
               {logoImg ? (
                 <img 
                   src={logoImg} 
                   alt="Barangay Culiat Seal" 
-                  className="w-12 h-12 rounded-full object-cover bg-white ring-2 ring-white/20 shadow-md" 
+                  className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover bg-white ring-2 ring-white/20 shadow-md shrink-0" 
                 />
               ) : (
-                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center font-bold text-[#0d7d4d]">
+                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white rounded-full flex items-center justify-center font-bold text-[#0d7d4d] shrink-0">
                   Logo
                 </div>
               )}
-              <div className="flex flex-col">
-                <span className="text-[10px] font-black tracking-[0.18em] text-[#22c55e] uppercase">
+              <div className="flex flex-col min-w-0">
+                <span className="text-[9px] sm:text-[10px] font-black tracking-[0.18em] text-[#22c55e] uppercase truncate">
                   Republic of the Philippines
                 </span>
-                <span className="font-display text-xl sm:text-2xl font-black leading-none tracking-tight text-white mt-0.5">
+                <span className="font-display text-lg sm:text-2xl font-black leading-none tracking-tight text-white mt-0.5 truncate">
                   Barangay Culiat
                 </span>
-                <span className="text-[10px] sm:text-[11px] font-medium text-white/70 mt-0.5">
+                <span className="text-[9px] sm:text-[11px] font-medium text-white/70 mt-0.5 hidden xs:block truncate">
                   Quezon City - Emergency Response System
                 </span>
               </div>
             </div>
 
-            <div className="flex items-center gap-8 text-white/90 font-bold text-sm tracking-wide">
+            {/* Desktop Navigation Links */}
+            <div className="hidden md:flex items-center gap-6 lg:gap-8 text-white/90 font-bold text-sm tracking-wide">
               <a 
                 href="#features" 
                 onClick={(e) => scrollToSection(e, "features")}
@@ -181,45 +185,109 @@ export function LandingPage({
               </a>
               <button 
                 onClick={onLogin} 
-                className="bg-[#0d7d4d] hover:bg-[#0b6a41] text-white text-xs sm:text-sm font-bold px-6 py-2.5 rounded-full shadow-lg flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="bg-[#0d7d4d] hover:bg-[#0b6a41] text-white text-xs sm:text-sm font-bold px-6 py-2.5 rounded-full shadow-lg flex items-center gap-1.5 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
               >
                 <span>Sign In</span>
                 <ChevronRight size={15} />
               </button>
             </div>
+
+            {/* Mobile Header Controls */}
+            <div className="flex items-center gap-2 md:hidden">
+              <button
+                onClick={onLogin}
+                className="bg-[#0d7d4d] hover:bg-[#0b6a41] text-white text-xs font-bold px-3.5 py-2 rounded-full flex items-center gap-1 cursor-pointer transition-all active:scale-95 shadow-md"
+              >
+                <span>Sign In</span>
+              </button>
+              <button
+                onClick={() => setMobileMenuOpen(prev => !prev)}
+                className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                aria-label="Toggle navigation menu"
+              >
+                {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+              </button>
+            </div>
           </nav>
 
+          {/* Mobile Dropdown Navigation Drawer */}
+          {mobileMenuOpen && (
+            <div className="md:hidden sticky top-20 z-40 w-full bg-[#061c10]/95 backdrop-blur-2xl border-b border-white/10 px-5 py-5 flex flex-col gap-3 shadow-2xl animate-in fade-in slide-in-from-top-4 duration-200">
+              <a 
+                href="#features" 
+                onClick={(e) => { scrollToSection(e, "features"); setMobileMenuOpen(false); }}
+                className="text-white/90 hover:text-white font-semibold text-sm py-2 px-1 border-b border-white/5 flex items-center justify-between"
+              >
+                <span>Features</span>
+                <ChevronRight size={14} className="text-white/40" />
+              </a>
+              <a 
+                href="#roles" 
+                onClick={(e) => { scrollToSection(e, "roles"); setMobileMenuOpen(false); }}
+                className="text-white/90 hover:text-white font-semibold text-sm py-2 px-1 border-b border-white/5 flex items-center justify-between"
+              >
+                <span>User Roles</span>
+                <ChevronRight size={14} className="text-white/40" />
+              </a>
+              <a 
+                href="#map" 
+                onClick={(e) => { scrollToSection(e, "map"); setMobileMenuOpen(false); }}
+                className="text-white/90 hover:text-white font-semibold text-sm py-2 px-1 border-b border-white/5 flex items-center justify-between"
+              >
+                <span>Location Map</span>
+                <ChevronRight size={14} className="text-white/40" />
+              </a>
+              <div className="pt-2 flex flex-col gap-2.5">
+                <button 
+                  onClick={() => { setMobileMenuOpen(false); onLogin(); }} 
+                  className="w-full bg-[#0d7d4d] hover:bg-[#0b6a41] text-white text-xs sm:text-sm font-bold py-3 rounded-full shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  <span>Sign In to Portal</span>
+                  <ChevronRight size={15} />
+                </button>
+                {onRegister && (
+                  <button 
+                    onClick={() => { setMobileMenuOpen(false); onRegister(); }} 
+                    className="w-full bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-bold py-3 rounded-full border border-white/10 flex items-center justify-center cursor-pointer transition-all"
+                  >
+                    Create Resident Account
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Hero Main Content */}
-          <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto px-6 py-16 lg:py-24 text-center">
+          <div className="flex-1 flex flex-col items-center justify-center max-w-4xl mx-auto px-4 sm:px-6 py-12 sm:py-16 lg:py-24 text-center">
             {/* Pill Eyebrow */}
-            <div className="inline-flex items-center text-[10px] sm:text-xs uppercase font-extrabold tracking-[0.18em] text-[#4ade80] px-4 py-1.5 rounded-full mb-6 border border-[#22c55e]/30 bg-[#22c55e]/10 backdrop-blur-sm">
-              Disaster Preparedness Training & Simulation System
+            <div className="inline-flex items-center text-[10px] sm:text-xs uppercase font-extrabold tracking-[0.14em] sm:tracking-[0.18em] text-[#4ade80] px-3.5 sm:px-4 py-1.5 rounded-full mb-5 sm:mb-6 border border-[#22c55e]/30 bg-[#22c55e]/10 backdrop-blur-sm max-w-[95%]">
+              <span className="truncate">Disaster Preparedness Training & Simulation System</span>
             </div>
             
             {/* Main Headline */}
-            <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-black text-white leading-[1.08] tracking-tight mb-6 drop-shadow-md">
+            <h1 className="font-display text-4xl sm:text-6xl lg:text-7xl font-black text-white leading-[1.08] tracking-tight mb-5 sm:mb-6 drop-shadow-md">
               Learn to Help.<br />
               Be Ready to<br />
               Respond.
             </h1>
             
             {/* Subtitle */}
-            <p className="text-base sm:text-lg text-white/80 max-w-2xl mx-auto mb-10 font-normal leading-relaxed">
+            <p className="text-sm sm:text-base lg:text-lg text-white/80 max-w-2xl mx-auto mb-8 sm:mb-10 font-normal leading-relaxed px-2">
               Get the training you need to keep your community safe. Simple, clear lessons. Real-world practice. Everything a disaster response team needs.
             </p>
 
             {/* Action Buttons */}
-            <div className="flex flex-wrap items-center justify-center gap-4">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3.5 w-full sm:w-auto px-4 sm:px-0">
               <button 
                 onClick={onRegister || onLogin} 
-                className="bg-[#0d7d4d] hover:bg-[#0b6a41] text-white text-sm font-bold px-7 py-3 rounded-full shadow-xl flex items-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="w-full sm:w-auto bg-[#0d7d4d] hover:bg-[#0b6a41] text-white text-xs sm:text-sm font-bold px-7 py-3.5 rounded-full shadow-xl flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
               >
                 <span>Get Started Today</span>
                 <ArrowRight size={16} />
               </button>
               <button 
                 onClick={(e) => scrollToSection(e, "features")} 
-                className="bg-white/10 hover:bg-white/20 text-white border border-white/20 text-sm font-bold px-7 py-3 rounded-full backdrop-blur-sm shadow-md transition-all hover:scale-[1.02]"
+                className="w-full sm:w-auto bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs sm:text-sm font-bold px-7 py-3.5 rounded-full backdrop-blur-sm shadow-md transition-all hover:scale-[1.02] cursor-pointer"
               >
                 See How It Works
               </button>
