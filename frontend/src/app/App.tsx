@@ -1319,9 +1319,9 @@ function LoginScreen({
       return;
     }
 
-    setOtpPurpose("login");
+    // Direct sign in without OTP - OTP is only enabled during registration
     setError("");
-    generateAndSendOtp(account);
+    proceedLogin(account);
   };
 
   const handleRegisterSubmit = () => {
