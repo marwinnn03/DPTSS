@@ -1093,7 +1093,7 @@ function LoginScreen({
 }: {
   onLogin: (u: AuthUser) => void;
   onBack?: () => void;
-  onRegisterSuccess?: () => void;
+  onRegisterSuccess?: (u: AuthUser) => void;
   initialMode?: "signin" | "register";
 }) {
   const app = useApp();
@@ -1432,6 +1432,16 @@ function LoginScreen({
   const handleOtpSuccess = () => {
     if (!pendingAccount) return;
 
+    const authUser: AuthUser = {
+      name: pendingAccount.name,
+      email: pendingAccount.email,
+      role: pendingAccount.role as Role,
+      dept: pendingAccount.dept,
+      avatar: pendingAccount.avatar,
+      phone: pendingAccount.phone,
+      status: pendingAccount.status,
+    };
+
     if (otpPurpose === "register") {
       const roleName = pendingAccount.role === "superadmin" ? "Super Admin" : pendingAccount.role === "admin" ? "Admin" : "Resident";
       app.showToast(
@@ -1446,11 +1456,9 @@ function LoginScreen({
       setError("");
       setStep("credentials");
       if (onRegisterSuccess) {
-        onRegisterSuccess();
-      } else if (onBack) {
-        onBack();
+        onRegisterSuccess(authUser);
       } else {
-        setAuthMode("signin");
+        onLogin(authUser);
       }
     } else {
       proceedLogin(pendingAccount);
@@ -6320,6 +6328,7 @@ function AppContent() {
 
   const handleLogout = (reason?: string) => {
     setAuth(null);
+    setView("landing");
     if (reason) {
       app.showToast(reason, "warning", "Session Ended");
     }
@@ -6351,12 +6360,14 @@ function AppContent() {
           initialMode={authMode}
           onLogin={(user) => {
             setAuth(user);
-            app.showToast(`Welcome back, ${user.name}! (${user.role.toUpperCase()})`, "success", "Signed In Successfully");
+            const roleTitle = user.role === "superadmin" ? "Super Admin" : user.role === "admin" ? "Admin" : "Resident";
+            app.showToast(`Welcome back, ${user.name}! (${roleTitle})`, "success", "Signed In Successfully");
           }}
           onBack={() => setView("landing")}
-          onRegisterSuccess={() => {
-            setAuthMode("signin");
-            setView("landing");
+          onRegisterSuccess={(user) => {
+            setAuth(user);
+            const roleTitle = user.role === "superadmin" ? "Super Admin" : user.role === "admin" ? "Admin" : "Resident";
+            app.showToast(`Account registered! Welcome to your ${roleTitle} portal, ${user.name}!`, "success", "Registration Successful");
           }}
         />
         <ToastContainer />
