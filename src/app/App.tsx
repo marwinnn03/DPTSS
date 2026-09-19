@@ -1088,10 +1088,12 @@ function SessionTimeoutHandler({ onLogout }: { onLogout: (reason?: string) => vo
 function LoginScreen({
   onLogin,
   onBack,
+  onRegisterSuccess,
   initialMode = "signin"
 }: {
   onLogin: (u: AuthUser) => void;
   onBack?: () => void;
+  onRegisterSuccess?: () => void;
   initialMode?: "signin" | "register";
 }) {
   const app = useApp();
@@ -1101,12 +1103,12 @@ function LoginScreen({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
-  const [signInRole, setSignInRole] = useState<AuthRole>("user");
 
   // Register States
   const [regFullName, setRegFullName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
+  const [regRole, setRegRole] = useState<AuthRole>("user");
 
   // Error and UI States
   const [error, setError] = useState("");
@@ -1120,6 +1122,7 @@ function LoginScreen({
 
   // OTP & Supabase Verification States
   const [step, setStep] = useState<"credentials" | "otp">("credentials");
+  const [otpPurpose, setOtpPurpose] = useState<"login" | "register">("login");
   const [otpInput, setOtpInput] = useState("");
   const [generatedOtp, setGeneratedOtp] = useState("");
   const [otpTimeLeft, setOtpTimeLeft] = useState(120); // 2 minutes (120 seconds)
@@ -1147,6 +1150,46 @@ function LoginScreen({
     };
   }, [step, otpTimeLeft]);
 
+  // Helper function to insert/upsert user record into Supabase public.users table
+  const insertUserToSupabase = async (acc: AuthAccount) => {
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .upsert(
+          {
+            name: acc.name,
+            email: acc.email.toLowerCase().trim(),
+            role: acc.role,
+            department: acc.dept,
+            avatar_initials: acc.avatar,
+            phone: acc.phone || null,
+            is_active: acc.status !== "Suspended",
+          },
+          { onConflict: "email" }
+        )
+        .select();
+
+      if (error) {
+        console.warn("Supabase public.users insert note:", error.message, error.code);
+        if (error.code === "42501" || error.message.includes("row-level security")) {
+          app.showToast(
+            "Supabase database blocked insert due to RLS. Run 'ALTER TABLE public.users DISABLE ROW LEVEL SECURITY;' in your Supabase SQL Editor.",
+            "warning",
+            "Supabase RLS Restriction",
+            10000
+          );
+        }
+      } else {
+        console.log("Supabase public.users synchronized:", acc.email);
+        app.showToast(`Account ${acc.email} synchronized to Supabase!`, "success", "Supabase DB Synced");
+      }
+      return { data, error };
+    } catch (err: any) {
+      console.warn("Supabase public.users insert exception:", err);
+      return { data: null, error: err };
+    }
+  };
+
   const generateAndSendOtp = async (account: AuthAccount) => {
     setIsSupabaseSending(true);
     setError("");
@@ -1154,25 +1197,54 @@ function LoginScreen({
     setOtpInput("");
     setOtpTimeLeft(120);
 
-    // Fallback/Testing code (guarantees seamless access for demo/evaluation)
+    // Fallback/Testing code (guarantees seamless access for demo/evaluation/offline)
     const localCode = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedOtp(localCode);
 
     try {
-      // Call Supabase built-in Auth OTP
-      const { data, error: sbError } = await supabase.auth.signInWithOtp({
+      // 1. Call Supabase built-in Auth OTP
+      let { data, error: sbError } = await supabase.auth.signInWithOtp({
         email: account.email,
         options: {
-          shouldCreateUser: false,
+          shouldCreateUser: true,
+          emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+          data: {
+            name: account.name,
+            role: account.role,
+            dept: account.dept,
+          },
         },
       });
+
+      // 2. If rejected with "Signups not allowed for otp", attempt registering via signUp
+      if (sbError && sbError.message.toLowerCase().includes("signups not allowed")) {
+        console.warn("Supabase signInWithOtp restricted for unregistered user. Attempting signUp fallback:", sbError.message);
+        const { data: suData, error: suError } = await supabase.auth.signUp({
+          email: account.email,
+          password: account.password || "password123",
+          options: {
+            data: {
+              name: account.name,
+              role: account.role,
+              dept: account.dept,
+            },
+            emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+          },
+        });
+
+        if (!suError && (suData?.user || suData?.session)) {
+          sbError = null; // Successfully created user and dispatched verification OTP email!
+        } else if (suError) {
+          console.warn("Supabase signUp fallback note:", suError.message);
+        }
+      }
 
       if (sbError) {
         console.warn("Supabase signInWithOtp note:", sbError.message);
         setOtpDeliveryMethod("simulated");
         setStep("otp");
         app.showToast(
-          `Supabase Auth: ${sbError.message}. Using 2-min verification code: ${localCode}`,
+          `Supabase Auth: ${sbError.message}. Using backup verification code: ${localCode}`,
           "warning",
           "Supabase Auth Notice"
         );
@@ -1210,54 +1282,35 @@ function LoginScreen({
     let account = accountList.find(a => a.email.toLowerCase() === trimmedEmail);
 
     if (!account) {
-      const defaultRoleAccount = accountList.find(a => a.role === signInRole && a.status !== "Suspended");
-      if (defaultRoleAccount && trimmedEmail === defaultRoleAccount.email.toLowerCase()) {
-        account = defaultRoleAccount;
-      } else {
-        const defaultNames: Record<AuthRole, string> = {
-          user: "Barangay Resident",
-          admin: "Barangay Safety Officer",
-          superadmin: "Barangay Executive Admin",
-        };
-        const defaultDepts: Record<AuthRole, string> = {
-          user: "Community Residents",
-          admin: "Public Safety & DRRM",
-          superadmin: "Barangay Leadership",
-        };
-        const newAcc: AuthAccount = {
-          id: "USR-" + Date.now().toString(36).toUpperCase(),
-          name: trimmedEmail.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, l => l.toUpperCase()) || defaultNames[signInRole],
-          email: trimmedEmail,
-          password: password || "password123",
-          role: signInRole,
-          dept: defaultDepts[signInRole],
-          avatar: trimmedEmail.slice(0, 2).toUpperCase(),
-          phone: "0917-000-0000",
-          status: "Active",
-        };
-        app.addAccount(newAcc);
-        if (signInRole === "user") {
-          app.registerParticipant({
-            id: newAcc.id,
-            name: newAcc.name,
-            email: newAcc.email,
-            dept: newAcc.dept,
-            role: "Community Resident",
-            level: "Basic",
-            status: "Active",
-          });
-        }
-        account = newAcc;
-      }
+      const newAcc: AuthAccount = {
+        id: "USR-" + Date.now().toString(36).toUpperCase(),
+        name: trimmedEmail.split("@")[0].replace(/[._]/g, " ").replace(/\b\w/g, l => l.toUpperCase()) || "Barangay Resident",
+        email: trimmedEmail,
+        password: password || "password123",
+        role: "user",
+        dept: "Community Residents",
+        avatar: trimmedEmail.slice(0, 2).toUpperCase(),
+        phone: "0917-000-0000",
+        status: "Active",
+      };
+      app.addAccount(newAcc);
+      app.registerParticipant({
+        id: newAcc.id,
+        name: newAcc.name,
+        email: newAcc.email,
+        dept: newAcc.dept,
+        role: "Community Resident",
+        level: "Basic",
+        status: "Active",
+      });
+      // Insert/sync user to Supabase public.users database table
+      insertUserToSupabase(newAcc);
+      account = newAcc;
     }
 
     if (account.status === "Suspended") {
       setError("This account has been suspended by an administrator. Access denied.");
       return;
-    }
-
-    if (account.role !== signInRole) {
-      account = { ...account, role: signInRole };
     }
 
     const expectedPw = account.password || "password123";
@@ -1266,6 +1319,7 @@ function LoginScreen({
       return;
     }
 
+    setOtpPurpose("login");
     setError("");
     generateAndSendOtp(account);
   };
@@ -1288,48 +1342,78 @@ function LoginScreen({
     const accountList = app.accounts && app.accounts.length > 0 ? app.accounts : SEED_ACCOUNTS;
     const existing = accountList.find(a => a.email.toLowerCase() === trimmedEmail);
     if (existing) {
-      setError("An account with this email already exists. Please sign in.");
+      const updatedAccount: AuthAccount = {
+        ...existing,
+        name: regFullName.trim() || existing.name,
+        password: regPassword || existing.password,
+        role: regRole,
+      };
+      // Re-trigger sync to Supabase database & auth
+      insertUserToSupabase(updatedAccount);
+      supabase.auth.signUp({
+        email: trimmedEmail,
+        password: regPassword || existing.password || "password123",
+        options: { data: { name: updatedAccount.name, role: regRole, dept: updatedAccount.dept } },
+      }).catch(e => console.warn("Supabase auth signUp note:", e));
+
+      setError("This account already exists. Please click 'Sign in' below to log in.");
       return;
     }
 
     const accId = "USR-" + Date.now().toString(36).toUpperCase();
     const initials = regFullName.trim().split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) || "CR";
 
+    const defaultDepts: Record<AuthRole, string> = {
+      user: "Community Residents",
+      admin: "Public Safety & DRRM",
+      superadmin: "Barangay Leadership",
+    };
+
     const newAcc: AuthAccount = {
       id: accId,
       name: regFullName.trim(),
       email: trimmedEmail,
       password: regPassword,
-      role: "user",
-      dept: "Community Residents",
+      role: regRole,
+      dept: defaultDepts[regRole],
       avatar: initials,
       phone: "0917-000-0000",
       status: "Active",
     };
 
     app.addAccount(newAcc);
-    app.registerParticipant({
-      id: accId,
-      name: newAcc.name,
-      email: newAcc.email,
-      dept: "Community Residents",
-      role: "Community Resident",
-      level: "Basic",
-      status: "Active",
-    });
+    if (regRole === "user") {
+      app.registerParticipant({
+        id: accId,
+        name: newAcc.name,
+        email: newAcc.email,
+        dept: newAcc.dept,
+        role: "Community Resident",
+        level: "Basic",
+        status: "Active",
+      });
+    }
 
-    app.showToast(`Account registered successfully! Welcome, ${newAcc.name}! Please sign in to continue.`, "success", "Registration Successful");
+    // Insert/sync user to Supabase public.users database table
+    insertUserToSupabase(newAcc);
 
-    // Switch to sign-in form so resident can log in
-    setAuthMode("signin");
-    setSignInRole("user");
-    setEmail(trimmedEmail);
-    setPassword(regPassword);
-    setSuccessMsg("Account created successfully! Please sign in to continue.");
-    setRegFullName("");
-    setRegEmail("");
-    setRegPassword("");
+    // Also provision account in Supabase Auth so email OTP is enabled
+    supabase.auth.signUp({
+      email: trimmedEmail,
+      password: regPassword,
+      options: {
+        data: {
+          name: newAcc.name,
+          role: regRole,
+          dept: newAcc.dept,
+        },
+      },
+    }).catch(e => console.warn("Supabase Auth registration notice:", e));
+
+    // Require OTP verification before completing registration and redirecting to landing page
+    setOtpPurpose("register");
     setError("");
+    generateAndSendOtp(newAcc);
   };
 
   const proceedLogin = (acc: AuthAccount) => {
@@ -1343,6 +1427,34 @@ function LoginScreen({
       status: acc.status,
     };
     onLogin(authUser);
+  };
+
+  const handleOtpSuccess = () => {
+    if (!pendingAccount) return;
+
+    if (otpPurpose === "register") {
+      const roleName = pendingAccount.role === "superadmin" ? "Super Admin" : pendingAccount.role === "admin" ? "Admin" : "Resident";
+      app.showToast(
+        `Registration and verification successful as ${roleName}! Welcome, ${pendingAccount.name}!`,
+        "success",
+        "Registration Complete"
+      );
+      setRegFullName("");
+      setRegEmail("");
+      setRegPassword("");
+      setRegRole("user");
+      setError("");
+      setStep("credentials");
+      if (onRegisterSuccess) {
+        onRegisterSuccess();
+      } else if (onBack) {
+        onBack();
+      } else {
+        setAuthMode("signin");
+      }
+    } else {
+      proceedLogin(pendingAccount);
+    }
   };
 
   const handleOtpVerify = async () => {
@@ -1363,34 +1475,54 @@ function LoginScreen({
 
     try {
       if (otpDeliveryMethod === "supabase") {
-        const { data, error: sbVerifyError } = await supabase.auth.verifyOtp({
+        let verifySuccess = false;
+        let verifyErr = "";
+
+        const { data: emailData, error: sbVerifyError } = await supabase.auth.verifyOtp({
           email: pendingAccount.email,
           token: otpInput.trim(),
           type: "email",
         });
 
-        if (sbVerifyError) {
+        if (!sbVerifyError && (emailData?.session || emailData?.user)) {
+          verifySuccess = true;
+        } else {
+          verifyErr = sbVerifyError?.message || "";
+          // If type: email failed, try type: signup in case the OTP was issued via signUp
+          const { data: suData, error: suVerifyError } = await supabase.auth.verifyOtp({
+            email: pendingAccount.email,
+            token: otpInput.trim(),
+            type: "signup",
+          });
+          if (!suVerifyError && (suData?.session || suData?.user)) {
+            verifySuccess = true;
+          } else if (suVerifyError) {
+            verifyErr = suVerifyError.message || verifyErr;
+          }
+        }
+
+        if (!verifySuccess) {
           if (generatedOtp && otpInput.trim() === generatedOtp) {
-            proceedLogin(pendingAccount);
+            handleOtpSuccess();
             return;
           }
-          setError(`Supabase Verification Failed: ${sbVerifyError.message}`);
+          setError(`Supabase Verification Failed: ${verifyErr || "Invalid 6-digit code"}`);
           setIsSupabaseVerifying(false);
           return;
         }
 
-        proceedLogin(pendingAccount);
+        handleOtpSuccess();
       } else {
         if (otpInput.trim() !== generatedOtp) {
           setError("Invalid 6-digit OTP code. Please try again.");
           setIsSupabaseVerifying(false);
           return;
         }
-        proceedLogin(pendingAccount);
+        handleOtpSuccess();
       }
     } catch (err: any) {
       if (generatedOtp && otpInput.trim() === generatedOtp) {
-        proceedLogin(pendingAccount);
+        handleOtpSuccess();
         return;
       }
       setError(`Verification error: ${err.message || "Failed to verify OTP"}`);
@@ -1437,7 +1569,7 @@ function LoginScreen({
               <p className="text-xs text-gray-500 text-center font-normal leading-relaxed max-w-[340px] mb-5">
                 {authMode === "signin"
                   ? "Residents and barangay officials both sign in here — you will land in the right workspace for your account."
-                  : "Residents / mga residente: create an account to register for campaigns and get your QR ticket."}
+                  : "Select your role and create an account to get started with the DRRM disaster preparedness system."}
               </p>
 
               {/* Segmented Tab Switch: Sign In vs Register */}
@@ -1468,16 +1600,18 @@ function LoginScreen({
               <button
                 type="button"
                 onClick={() => {
-                  const roleAccounts: Record<AuthRole, { email: string; name: string }> = {
-                    user: { email: "m.santos@ems.gov", name: "Maria Santos" },
-                    admin: { email: "admin@ems.gov", name: "Capt. Santos" },
-                    superadmin: { email: "superadmin@ems.gov", name: "Director Reyes" },
-                  };
-                  const target = roleAccounts[signInRole];
-                  app.showToast(`Google Sign-In: Authenticating as ${signInRole.toUpperCase()} (${target.name})...`, "info", "Google Sign-In");
-                  setEmail(target.email);
-                  setPassword("password123");
-                  setError("");
+                  if (authMode === "signin") {
+                    const target = { email: "m.santos@ems.gov", name: "Maria Santos" };
+                    app.showToast(`Google Sign-In: Authenticating as ${target.name}...`, "info", "Google Sign-In");
+                    setEmail(target.email);
+                    setPassword("password123");
+                    setError("");
+                  } else {
+                    setRegFullName("Demo Google User");
+                    setRegEmail("google.user@ems.gov");
+                    setRegPassword("password123");
+                    app.showToast("Google credentials pre-filled for registration.", "info", "Google Account");
+                  }
                 }}
                 className="w-full py-2.5 px-4 rounded-full border border-gray-200 hover:bg-gray-50 text-xs font-bold text-gray-800 flex items-center justify-center gap-2.5 transition-colors mb-3.5 shadow-2xs cursor-pointer"
               >
@@ -1506,53 +1640,6 @@ function LoginScreen({
                       <span className="font-semibold leading-snug">{successMsg}</span>
                     </div>
                   )}
-
-                  {/* Role Selector before login */}
-                  <div>
-                    <label className="block text-xs font-bold text-gray-800 mb-1.5">Sign In Role</label>
-                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#f0f2ee] rounded-2xl border border-gray-200/80">
-                      <button
-                        type="button"
-                        onClick={() => { setSignInRole("user"); setError(""); }}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${signInRole === "user"
-                          ? "bg-white text-emerald-800 shadow-sm border border-emerald-600/30"
-                          : "text-gray-600 hover:text-gray-900"
-                          }`}
-                      >
-                        <User size={14} className={signInRole === "user" ? "text-[#0d7d4d]" : "text-gray-500"} />
-                        <span>Resident</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => { setSignInRole("admin"); setError(""); }}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${signInRole === "admin"
-                          ? "bg-white text-purple-800 shadow-sm border border-purple-600/30"
-                          : "text-gray-600 hover:text-gray-900"
-                          }`}
-                      >
-                        <ShieldCheck size={14} className={signInRole === "admin" ? "text-purple-600" : "text-gray-500"} />
-                        <span>Admin</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => { setSignInRole("superadmin"); setError(""); }}
-                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${signInRole === "superadmin"
-                          ? "bg-white text-red-800 shadow-sm border border-red-600/30"
-                          : "text-gray-600 hover:text-gray-900"
-                          }`}
-                      >
-                        <Crown size={14} className={signInRole === "superadmin" ? "text-red-500" : "text-gray-500"} />
-                        <span>Super Admin</span>
-                      </button>
-                    </div>
-                    <div className="text-[10.5px] text-gray-500 mt-1 px-1 leading-tight">
-                      {signInRole === "user" && "Resident portal: drills, schedules, personal certs & QR pass."}
-                      {signInRole === "admin" && "Safety officer: manage programs, sessions & attendance logs."}
-                      {signInRole === "superadmin" && "Executive leadership: command center, reports & system administration."}
-                    </div>
-                  </div>
 
                   <div>
                     <label className="block text-xs font-bold text-gray-800 mb-1">Email</label>
@@ -1606,12 +1693,7 @@ function LoginScreen({
                   <button
                     onClick={handleCredentialsSubmit}
                     disabled={isSupabaseSending}
-                    className={`w-full mt-2 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-full text-xs shadow-md hover:shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 ${signInRole === "superadmin"
-                      ? "bg-gray-900 hover:bg-black"
-                      : signInRole === "admin"
-                        ? "bg-purple-700 hover:bg-purple-800"
-                        : "bg-[#0d7d4d] hover:bg-[#0b6a41]"
-                      }`}
+                    className="w-full mt-2 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-full text-xs shadow-md hover:shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 bg-[#0d7d4d] hover:bg-[#0b6a41]"
                   >
                     {isSupabaseSending ? (
                       <>
@@ -1620,7 +1702,7 @@ function LoginScreen({
                       </>
                     ) : (
                       <>
-                        <span>Sign in as {signInRole === "superadmin" ? "Super Admin" : signInRole === "admin" ? "Admin" : "Resident"}</span>
+                        <span>Sign In</span>
                         <ArrowRight size={14} />
                       </>
                     )}
@@ -1629,6 +1711,53 @@ function LoginScreen({
               ) : (
                 /* Register Mode Form */
                 <div className="w-full space-y-3">
+                  {/* Role Selector in Register */}
+                  <div>
+                    <label className="block text-xs font-bold text-gray-800 mb-1.5">Register as Role</label>
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#f0f2ee] rounded-2xl border border-gray-200/80">
+                      <button
+                        type="button"
+                        onClick={() => { setRegRole("user"); setError(""); }}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${regRole === "user"
+                          ? "bg-white text-emerald-800 shadow-sm border border-emerald-600/30"
+                          : "text-gray-600 hover:text-gray-900"
+                          }`}
+                      >
+                        <User size={14} className={regRole === "user" ? "text-[#0d7d4d]" : "text-gray-500"} />
+                        <span>Resident</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setRegRole("admin"); setError(""); }}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${regRole === "admin"
+                          ? "bg-white text-purple-800 shadow-sm border border-purple-600/30"
+                          : "text-gray-600 hover:text-gray-900"
+                          }`}
+                      >
+                        <ShieldCheck size={14} className={regRole === "admin" ? "text-purple-600" : "text-gray-500"} />
+                        <span>Admin</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => { setRegRole("superadmin"); setError(""); }}
+                        className={`py-2 px-1 rounded-xl text-[11px] font-bold flex flex-col items-center justify-center gap-1 transition-all cursor-pointer ${regRole === "superadmin"
+                          ? "bg-white text-red-800 shadow-sm border border-red-600/30"
+                          : "text-gray-600 hover:text-gray-900"
+                          }`}
+                      >
+                        <Crown size={14} className={regRole === "superadmin" ? "text-red-500" : "text-gray-500"} />
+                        <span>Super Admin</span>
+                      </button>
+                    </div>
+                    <div className="text-[10.5px] text-gray-500 mt-1 px-1 leading-tight">
+                      {regRole === "user" && "Resident portal: drills, schedules, personal certs & QR pass."}
+                      {regRole === "admin" && "Safety officer: manage programs, sessions & attendance logs."}
+                      {regRole === "superadmin" && "Executive leadership: command center, reports & system administration."}
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold text-gray-800 mb-1">Full name</label>
                     <input
@@ -1683,10 +1812,25 @@ function LoginScreen({
 
                   <button
                     onClick={handleRegisterSubmit}
-                    className="w-full mt-2 flex items-center justify-center gap-2 bg-[#6aa489] hover:bg-[#0d7d4d] text-white font-bold py-3 rounded-full text-xs shadow-md hover:shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer"
+                    disabled={isSupabaseSending}
+                    className={`w-full mt-2 flex items-center justify-center gap-2 text-white font-bold py-3 rounded-full text-xs shadow-md hover:shadow-lg transition-all hover:scale-[1.01] active:scale-[0.99] cursor-pointer disabled:opacity-60 ${regRole === "superadmin"
+                      ? "bg-gray-900 hover:bg-black"
+                      : regRole === "admin"
+                        ? "bg-purple-700 hover:bg-purple-800"
+                        : "bg-[#0d7d4d] hover:bg-[#0b6a41]"
+                      }`}
                   >
-                    <span>Register</span>
-                    <ArrowRight size={14} />
+                    {isSupabaseSending ? (
+                      <>
+                        <RefreshCw size={14} className="animate-spin" />
+                        <span>Sending OTP...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Register as {regRole === "superadmin" ? "Super Admin" : regRole === "admin" ? "Admin" : "Resident"}</span>
+                        <ArrowRight size={14} />
+                      </>
+                    )}
                   </button>
                 </div>
               )}
@@ -1724,30 +1868,51 @@ function LoginScreen({
               <div className="text-center">
                 <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-50 text-[#0d7d4d] border border-emerald-200/60 mb-2">
                   <ShieldCheck size={12} />
-                  <span>Supabase Auth OTP · Step 2 of 2</span>
+                  <span>{otpPurpose === "register" ? "Email Verification · Step 2 of 2" : "Supabase Auth OTP · Step 2 of 2"}</span>
                 </div>
-                <h2 className="font-display font-black text-2xl text-gray-950 mb-1">Enter Verification Code</h2>
+                <h2 className="font-display font-black text-2xl text-gray-950 mb-1">
+                  {otpPurpose === "register" ? "Verify Your Registration" : "Enter Verification Code"}
+                </h2>
                 <p className="text-xs text-gray-500">
                   {otpDeliveryMethod === "supabase" ? (
-                    <>Supabase sent a 6-digit code to <strong className="text-gray-900">{pendingAccount?.email}</strong>.</>
+                    <>Supabase sent a 6-digit code to <strong className="text-gray-900">{pendingAccount?.email}</strong>{otpPurpose === "register" ? " to verify your account" : ""}.</>
                   ) : (
-                    <>A 6-digit verification code was generated for <strong className="text-gray-900">{pendingAccount?.email}</strong>.</>
+                    <>A 6-digit verification code was generated for <strong className="text-gray-900">{pendingAccount?.email}</strong>{otpPurpose === "register" ? " to verify your account" : ""}.</>
                   )}
                 </p>
               </div>
 
-              {/* Demo Auto-fill Helper Chip */}
-              <div
-                onClick={() => setOtpInput(generatedOtp)}
-                className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-[#0d7d4d] text-xs flex items-center justify-between cursor-pointer hover:bg-emerald-100/60 transition-colors shadow-2xs"
-                title="Click to automatically fill code"
-              >
-                <div className="flex items-center gap-2 font-bold">
-                  <Key size={14} />
-                  <span>Demo OTP Code: <strong className="font-mono text-sm tracking-wider">{generatedOtp}</strong></span>
+              {/* OTP Delivery / Fallback Chip */}
+              {otpDeliveryMethod === "supabase" ? (
+                <div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-200/80 text-[#0d7d4d] text-xs flex items-center justify-between shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <Mail size={15} className="shrink-0" />
+                    <span>Check your email inbox for the 6-digit Supabase code.</span>
+                  </div>
+                  {generatedOtp && (
+                    <button
+                      type="button"
+                      onClick={() => setOtpInput(generatedOtp)}
+                      className="text-[11px] font-bold underline hover:opacity-80 shrink-0 ml-2 cursor-pointer"
+                      title="Testing bypass code"
+                    >
+                      Bypass ({generatedOtp})
+                    </button>
+                  )}
                 </div>
-                <span className="text-[11px] underline font-bold">Auto-fill</span>
-              </div>
+              ) : (
+                <div
+                  onClick={() => setOtpInput(generatedOtp)}
+                  className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-center justify-between cursor-pointer hover:bg-amber-100/60 transition-colors shadow-2xs"
+                  title="Click to automatically fill code"
+                >
+                  <div className="flex items-center gap-2 font-bold">
+                    <Key size={14} className="text-amber-700" />
+                    <span>Backup OTP Code: <strong className="font-mono text-sm tracking-wider">{generatedOtp}</strong></span>
+                  </div>
+                  <span className="text-[11px] underline font-bold text-amber-800">Auto-fill</span>
+                </div>
+              )}
 
               <div>
                 <div className="flex items-center justify-between mb-1.5 text-xs">
@@ -1788,7 +1953,7 @@ function LoginScreen({
                 ) : (
                   <>
                     <ShieldCheck size={14} />
-                    <span>Verify & Sign In</span>
+                    <span>{otpPurpose === "register" ? "Verify & Complete Registration" : "Verify & Sign In"}</span>
                   </>
                 )}
               </button>
@@ -1796,10 +1961,16 @@ function LoginScreen({
               <div className="flex items-center justify-between pt-2 text-xs">
                 <button
                   type="button"
-                  onClick={() => { setStep("credentials"); setError(""); }}
+                  onClick={() => {
+                    setStep("credentials");
+                    setError("");
+                    if (otpPurpose === "register") {
+                      setAuthMode("register");
+                    }
+                  }}
                   className="text-gray-500 hover:text-gray-900 font-bold transition-colors cursor-pointer"
                 >
-                  ← Back to login
+                  {otpPurpose === "register" ? "← Back to register" : "← Back to login"}
                 </button>
                 <button
                   type="button"
@@ -6183,6 +6354,10 @@ function AppContent() {
             app.showToast(`Welcome back, ${user.name}! (${user.role.toUpperCase()})`, "success", "Signed In Successfully");
           }}
           onBack={() => setView("landing")}
+          onRegisterSuccess={() => {
+            setAuthMode("signin");
+            setView("landing");
+          }}
         />
         <ToastContainer />
       </>

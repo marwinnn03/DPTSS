@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { supabase } from "../supabaseClient";
 
 export type ProgramModule = { title: string; duration: string };
 export type Program = {
@@ -232,6 +233,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem(LS_KEYS.attendance, JSON.stringify(attendanceRecords)); }, [attendanceRecords]);
   useEffect(() => { localStorage.setItem(LS_KEYS.evaluations, JSON.stringify(assessorEvaluations)); }, [assessorEvaluations]);
   useEffect(() => { localStorage.setItem(LS_KEYS.accounts, JSON.stringify(accounts)); }, [accounts]);
+
+  // Synchronize accounts from Supabase public.users table on mount
+  useEffect(() => {
+    const fetchSupabaseUsers = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("users")
+          .select("*");
+
+        if (!error && data && data.length > 0) {
+          const remoteAccounts: AuthAccount[] = data.map((u: any) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            role: (u.role || "user") as AuthRole,
+            dept: u.department || "Community Residents",
+            avatar: u.avatar_initials || (u.name || "U").slice(0, 2).toUpperCase(),
+            phone: u.phone || "0917-000-0000",
+            status: u.is_active ? "Active" : "Suspended",
+          }));
+
+          setAccounts(prev => {
+            const accMap = new Map<string, AuthAccount>();
+            prev.forEach(a => accMap.set(a.email.toLowerCase(), a));
+            remoteAccounts.forEach(r => {
+              const existing = accMap.get(r.email.toLowerCase());
+              accMap.set(r.email.toLowerCase(), existing ? { ...existing, ...r } : r);
+            });
+            return Array.from(accMap.values());
+          });
+        }
+      } catch (err) {
+        console.warn("Supabase initial users load notice:", err);
+      }
+    };
+
+    fetchSupabaseUsers();
+  }, []);
   
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
@@ -253,57 +292,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     title?: string,
     duration?: number
   ) => {
-    const id = uid("TST");
     if (typeof toastOrMessage === "string") {
       setToast({
-        id,
-        message: toastOrMessage,
+        id: uid("T"),
         type: type || "info",
-        title: title || (type ? type.charAt(0).toUpperCase() + type.slice(1) : "Notification"),
-        duration: duration ?? 4200,
+        title: title || "Notification",
+        message: toastOrMessage,
+        duration,
       });
     } else {
-      setToast({ ...toastOrMessage, id });
+      setToast({
+        id: uid("T"),
+        ...toastOrMessage,
+      });
     }
   };
 
   const dismissToast = () => setToast(null);
 
   const addProgram = (p: Program) => {
-    setPrograms(prev => [{ ...p, id: uid("PRG") }, ...prev]);
-    showToast({ type: "success", title: "Program Created", message: `"${p.title}" is now available.` });
+    const newProg: Program = { ...p, id: p.id || uid("PRG"), createdDate: p.createdDate || new Date().toISOString() };
+    setPrograms(prev => [newProg, ...prev]);
+    showToast({ type: "success", title: "Program Created", message: `"${newProg.title}" has been saved.` });
+    addNotification({ type: "System", subject: `New program added: ${newProg.title}`, status: "Sent" });
   };
 
   const updateProgram = (id: string, updates: Partial<Program>) => {
     setPrograms(prev => prev.map(p => p.id === id ? { ...p, ...updates, lastUpdated: new Date().toISOString() } : p));
-    addNotification({ type: "Program", subject: `Program updated: ${updates.title ?? id}`, status: "Sent" }, true);
+    showToast({ type: "info", title: "Program Updated", message: "Program changes saved." });
   };
 
   const deleteProgram = (id: string) => {
+    const target = programs.find(p => p.id === id);
     setPrograms(prev => prev.filter(p => p.id !== id));
-    showToast({ type: "warning", title: "Program Removed", message: `Program ${id} was deleted.` });
+    showToast({ type: "warning", title: "Program Deleted", message: target ? `"${target.title}" was removed.` : "Program removed." });
   };
 
-  const createSession = (s: Session) => {
-    const newS = { ...s, id: uid("SES") };
+  const createSession = (s: Session): string => {
+    const id = s.id || uid("SES");
+    const newS: Session = { ...s, id, enrolled: s.enrolled ?? 0, createdDate: s.createdDate || new Date().toISOString() };
     setSessions(prev => [newS, ...prev]);
-    showToast({ type: "success", title: "Session Scheduled", message: `${s.course} on ${s.date}` });
-    return newS.id;
+    showToast({ type: "success", title: "Session Created", message: `Session for "${newS.course}" scheduled.` });
+    addNotification({ type: "Session", subject: `New session scheduled: ${newS.course}`, status: "Sent" }, true);
+    return id;
   };
 
   const updateSession = (id: string, updates: Partial<Session>) => {
     setSessions(prev => prev.map(s => s.id === id ? { ...s, ...updates, lastUpdated: new Date().toISOString() } : s));
-    addNotification({ type: "Session", subject: `Session updated: ${updates.course ?? id}`, status: "Sent" }, true);
+    showToast({ type: "info", title: "Session Updated", message: "Session details updated." });
   };
 
   const cancelSession = (id: string) => {
-    setSessions(prev => prev.map(s => s.id === id ? { ...s, status: "Cancelled", lastUpdated: new Date().toISOString() } : s));
-    addNotification({ type: "Session", subject: `Session ${id} cancelled`, status: "Sent" }, true);
+    setSessions(prev => prev.map(s => s.id === id ? { ...s, status: "Cancelled" } : s));
+    showToast({ type: "warning", title: "Session Cancelled", message: "Session has been marked as cancelled." });
   };
 
   const launchSession = (id: string) => {
     setSessions(prev => prev.map(s => s.id === id ? { ...s, status: "Launched" } : s));
-    addNotification({ type: "System", subject: `Session ${id} launched`, body: "A new simulation session has been launched.", status: "Sent" }, true);
+    showToast({ type: "success", title: "Session Launched", message: "Session is now active and in progress." });
   };
 
   const registerParticipant = (p: Participant) => {
@@ -333,11 +379,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAccounts(prev => [newAcc, ...prev.filter(a => a.email.toLowerCase() !== acc.email.toLowerCase())]);
     showToast({ type: "success", title: "User Account Created", message: `${acc.name} (${acc.role}) can now sign in.` });
+
+    // Sync to Supabase public.users table directly
+    (async () => {
+      try {
+        const { error } = await supabase
+          .from("users")
+          .upsert({
+            name: newAcc.name,
+            email: newAcc.email.toLowerCase().trim(),
+            role: newAcc.role,
+            department: newAcc.dept,
+            avatar_initials: newAcc.avatar,
+            phone: newAcc.phone || null,
+            is_active: newAcc.status !== "Suspended",
+          }, { onConflict: "email" });
+
+        if (error) {
+          console.warn("Supabase public.users sync note:", error.message);
+        } else {
+          console.log("Account successfully written to Supabase public.users:", newAcc.email);
+        }
+      } catch (e) {
+        console.warn("Supabase addAccount sync error:", e);
+      }
+    })();
   };
 
   const updateAccount = (idOrEmail: string, updates: Partial<AuthAccount>) => {
     setAccounts(prev => prev.map(a => (a.id === idOrEmail || a.email.toLowerCase() === idOrEmail.toLowerCase()) ? { ...a, ...updates } : a));
     showToast({ type: "info", title: "Account Updated", message: `Account permissions updated.` });
+
+    // Sync updates to Supabase public.users table directly
+    const dbUpdates: any = {};
+    if (updates.name) dbUpdates.name = updates.name;
+    if (updates.role) dbUpdates.role = updates.role;
+    if (updates.dept) dbUpdates.department = updates.dept;
+    if (updates.avatar) dbUpdates.avatar_initials = updates.avatar;
+    if (updates.phone) dbUpdates.phone = updates.phone;
+    if (updates.status) dbUpdates.is_active = updates.status !== "Suspended";
+
+    if (Object.keys(dbUpdates).length > 0 && idOrEmail.includes("@")) {
+      (async () => {
+        try {
+          const { error } = await supabase
+            .from("users")
+            .update(dbUpdates)
+            .eq("email", idOrEmail.toLowerCase().trim());
+
+          if (error) {
+            console.warn("Supabase user update note:", error.message);
+          }
+        } catch (e) {
+          console.warn("Supabase user update error:", e);
+        }
+      })();
+    }
   };
 
   const toggleDarkMode = () => setDarkMode(prev => !prev);

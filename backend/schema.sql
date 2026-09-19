@@ -135,6 +135,56 @@ CREATE INDEX IF NOT EXISTS idx_attendance_program ON public.attendance_records(p
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON public.notifications(read);
 CREATE INDEX IF NOT EXISTS idx_user_accounts_email ON public.user_accounts(email);
 
+-- 8. PUBLIC USERS TABLE (Integrated with Auth & Supabase DB)
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TABLE IF NOT EXISTS public.users (
+  id uuid NOT NULL DEFAULT gen_random_uuid (),
+  name character varying(255) NOT NULL,
+  email character varying(255) NOT NULL,
+  role character varying(50) NOT NULL,
+  department character varying(255) NULL,
+  avatar_initials character varying(20) NULL,
+  phone character varying(50) NULL,
+  password_id uuid NULL,
+  created_at timestamp with time zone NULL DEFAULT now(),
+  updated_at timestamp with time zone NULL DEFAULT now(),
+  is_active boolean NULL DEFAULT true,
+  CONSTRAINT users_pkey PRIMARY KEY (id),
+  CONSTRAINT users_email_key UNIQUE (email)
+);
+
+-- Trigger for public.users updated_at
+DROP TRIGGER IF EXISTS update_users_updated_at ON public.users;
+CREATE TRIGGER update_users_updated_at 
+BEFORE UPDATE ON public.users 
+FOR EACH ROW 
+EXECUTE FUNCTION update_updated_at_column ();
+
+-- INDEX FOR public.users
+CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
+
+-- RLS POLICIES FOR public.users (Enables frontend Supabase client to insert and read users)
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public read on users" ON public.users;
+CREATE POLICY "Allow public read on users" ON public.users FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on users" ON public.users;
+CREATE POLICY "Allow public insert on users" ON public.users FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public update on users" ON public.users;
+CREATE POLICY "Allow public update on users" ON public.users FOR UPDATE USING (true);
+
+GRANT ALL ON public.users TO anon, authenticated, service_role;
+
 -- SEED ESSENTIAL DEMO ACCOUNTS (ONLY IF NOT ALREADY PRESENT)
 INSERT INTO public.user_accounts (id, name, email, role, dept, avatar, phone, status, password)
 VALUES 
@@ -144,3 +194,4 @@ VALUES
     ('USR-004', 'Maria Santos', 'm.santos@ems.gov', 'user', 'Rescue Alpha', 'MS', '+63 917 200 5104', 'Active', 'password123'),
     ('USR-005', 'Jose Reyes', 'j.reyes@ems.gov', 'user', 'Medical Bravo', 'JR', '+63 917 200 5871', 'Active', 'password123')
 ON CONFLICT (email) DO NOTHING;
+
