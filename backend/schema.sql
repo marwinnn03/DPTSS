@@ -185,6 +185,46 @@ CREATE POLICY "Allow public update on users" ON public.users FOR UPDATE USING (t
 
 GRANT ALL ON public.users TO anon, authenticated, service_role;
 
+-- ==============================================================================
+-- MIGRATION & RLS POLICIES FOR public.programs
+-- Enables frontend to insert, update, delete, and read programs in Supabase
+-- ==============================================================================
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS level TEXT DEFAULT 'Basic';
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS modules INTEGER DEFAULT 1;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS duration TEXT DEFAULT '1 Day';
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS objectives JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS prerequisites TEXT;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS target_audience TEXT;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS certification_name TEXT;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS passing_score INTEGER DEFAULT 80;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS tags JSONB DEFAULT '[]'::jsonb;
+-- Ensure created_by is nullable and not blocked by foreign keys
+ALTER TABLE public.programs DROP CONSTRAINT IF EXISTS fk_programs_created_by;
+ALTER TABLE public.programs ALTER COLUMN created_by DROP NOT NULL;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS created_by TEXT DEFAULT 'Admin';
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS disaster_type TEXT;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS estimated_cost NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS module_list JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.programs ADD COLUMN IF NOT EXISTS assessor TEXT;
+
+ALTER TABLE public.programs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow public read on programs" ON public.programs;
+CREATE POLICY "Allow public read on programs" ON public.programs FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow public insert on programs" ON public.programs;
+CREATE POLICY "Allow public insert on programs" ON public.programs FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow public update on programs" ON public.programs;
+CREATE POLICY "Allow public update on programs" ON public.programs FOR UPDATE USING (true);
+
+DROP POLICY IF EXISTS "Allow public delete on programs" ON public.programs;
+CREATE POLICY "Allow public delete on programs" ON public.programs FOR DELETE USING (true);
+
+GRANT ALL ON public.programs TO anon, authenticated, service_role;
+
 -- SEED ESSENTIAL DEMO ACCOUNTS (ONLY IF NOT ALREADY PRESENT)
 INSERT INTO public.user_accounts (id, name, email, role, dept, avatar, phone, status, password)
 VALUES 
@@ -194,4 +234,5 @@ VALUES
     ('USR-004', 'Maria Santos', 'm.santos@ems.gov', 'user', 'Rescue Alpha', 'MS', '+63 917 200 5104', 'Active', 'password123'),
     ('USR-005', 'Jose Reyes', 'j.reyes@ems.gov', 'user', 'Medical Bravo', 'JR', '+63 917 200 5871', 'Active', 'password123')
 ON CONFLICT (email) DO NOTHING;
+
 
