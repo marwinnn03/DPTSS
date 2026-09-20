@@ -98,6 +98,26 @@ export type AuthAccount = {
   password?: string;
 };
 
+export type EvalObjective = {
+  id: number;
+  text: string;
+  done: boolean;
+  time: string;
+  limit: string;
+  benchmarkTime?: string;
+  verifiedBy?: string;
+  verifiedAt?: string;
+};
+
+export const INITIAL_EVAL_OBJECTIVES: EvalObjective[] = [
+  { id: 1, text: "IC assumes command on radio net", done: false, time: "—", limit: "2 min", benchmarkTime: "1:42" },
+  { id: 2, text: "Gas valve shut off at utility panel", done: false, time: "—", limit: "2 min", benchmarkTime: "1:58" },
+  { id: 3, text: "Evacuation route cleared and opened", done: false, time: "—", limit: "5 min", benchmarkTime: "4:15" },
+  { id: 4, text: "Triage zone with START protocol", done: false, time: "—", limit: "5 min", benchmarkTime: "4:31" },
+  { id: 5, text: "SITREP transmitted to EOC", done: false, time: "—", limit: "10 min", benchmarkTime: "9:05" },
+  { id: 6, text: "Accountability check completed", done: false, time: "—", limit: "10 min", benchmarkTime: "8:40" },
+];
+
 export const SEED_ACCOUNTS: AuthAccount[] = [
   { id: "USR-001", name: "Director Reyes", email: "superadmin@ems.gov", role: "superadmin", dept: "Command HQ", avatar: "DR", phone: "+63 917 200 1141", status: "Active", password: "password123" },
   { id: "USR-002", name: "Capt. Santos", email: "admin@ems.gov", role: "admin", dept: "Training Division", avatar: "CS", phone: "+63 917 200 2278", status: "Active", password: "password123" },
@@ -129,6 +149,7 @@ type AppContextType = {
   updateSession: (id: string, updates: Partial<Session>) => void;
   cancelSession: (id: string) => void;
   launchSession: (id: string) => void;
+  deleteSession: (id: string) => void;
   registerParticipant: (p: Participant) => void;
   addNotification: (n: Omit<Notification, "id" | "date" | "read">, triggerToast?: boolean) => void;
   exportCSV: (type: "programs" | "sessions" | "participants" | "attendance") => void;
@@ -140,9 +161,14 @@ type AppContextType = {
   clearNotification: (id: string) => void;
   clearAllNotifications: () => void;
   addAttendanceRecord: (r: Omit<AttendanceRecord, "id">) => void;
+  updateAttendanceRecord: (id: string, updates: Partial<AttendanceRecord>) => void;
+  removeAttendanceRecord: (id: string) => void;
   getAttendanceFor: (participantNameOrId: string) => AttendanceRecord[];
   submitAssessorEvaluation: (e: Omit<AssessorEvaluation, "id" | "date">) => void;
   getEvaluationsFor: (assessorName: string) => AssessorEvaluation[];
+  evalObjectives: EvalObjective[];
+  toggleEvalObjective: (id: number, verifiedBy?: string) => void;
+  resetEvalObjectives: () => void;
 };
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -155,7 +181,8 @@ const LS_KEYS = {
   darkMode: "dptss_dark_mode", 
   attendance: "dptss_attendance_v2", 
   evaluations: "dptss_assessor_evaluations",
-  accounts: "dptss_accounts"
+  accounts: "dptss_accounts",
+  evalObjectives: "dptss_eval_objectives"
 };
 
 function uid(prefix = "id") { return `${prefix}-${Math.random().toString(36).slice(2, 9)}`; }
@@ -231,6 +258,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   });
 
+  const [evalObjectives, setEvalObjectives] = useState<EvalObjective[]>(() => {
+    try {
+      const v = localStorage.getItem(LS_KEYS.evalObjectives);
+      if (v) {
+        const parsed = JSON.parse(v);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+      return INITIAL_EVAL_OBJECTIVES;
+    } catch {
+      return INITIAL_EVAL_OBJECTIVES;
+    }
+  });
+
   const [toast, setToast] = useState<Toast | null>(null);
 
   const [darkMode, setDarkMode] = useState<boolean>(() => {
@@ -248,6 +288,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => { localStorage.setItem(LS_KEYS.attendance, JSON.stringify(attendanceRecords)); }, [attendanceRecords]);
   useEffect(() => { localStorage.setItem(LS_KEYS.evaluations, JSON.stringify(assessorEvaluations)); }, [assessorEvaluations]);
   useEffect(() => { localStorage.setItem(LS_KEYS.accounts, JSON.stringify(accounts)); }, [accounts]);
+  useEffect(() => { localStorage.setItem(LS_KEYS.evalObjectives, JSON.stringify(evalObjectives)); }, [evalObjectives]);
 
   // Synchronize accounts from Supabase public.users table on mount
   useEffect(() => {
@@ -570,6 +611,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     showToast({ type: "success", title: "Session Launched", message: "Session is now active and in progress." });
   };
 
+  const deleteSession = (id: string) => {
+    setSessions(prev => prev.filter(s => s.id !== id));
+    showToast({ type: "warning", title: "Session Removed", message: "Session was removed from schedule." });
+  };
+
   const registerParticipant = (p: Participant) => {
     setParticipants(prev => [{ ...p, id: uid("P") }, ...prev]);
     showToast({ type: "success", title: "Participant Registered", message: `${p.name} enrolled.` });
@@ -662,6 +708,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addNotification({ type: "Attendance", subject: `${r.participantName} — ${r.program} marked ${r.status}`, status: "Sent" }, true);
   };
 
+  const updateAttendanceRecord = (id: string, updates: Partial<AttendanceRecord>) => {
+    setAttendanceRecords(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r));
+    showToast({ type: "info", title: "Attendance Updated", message: "Participant record updated." });
+  };
+
+  const removeAttendanceRecord = (id: string) => {
+    setAttendanceRecords(prev => prev.filter(r => r.id !== id));
+    showToast({ type: "warning", title: "Application Removed", message: "Application record removed." });
+  };
+
   const getAttendanceFor = (participantNameOrId: string) =>
     attendanceRecords.filter(r => r.participantId === participantNameOrId || r.participantName === participantNameOrId);
 
@@ -673,6 +729,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const getEvaluationsFor = (assessorName: string) => assessorEvaluations.filter(e => e.assessorName === assessorName);
+
+  const toggleEvalObjective = (id: number, verifiedBy = "Admin Evaluator") => {
+    setEvalObjectives(prev => {
+      const target = prev.find(o => o.id === id);
+      if (!target) return prev;
+      const nextDone = !target.done;
+      const updated = prev.map(o => {
+        if (o.id !== id) return o;
+        return {
+          ...o,
+          done: nextDone,
+          time: nextDone ? (o.benchmarkTime || "1:42") : "—",
+          verifiedBy: nextDone ? verifiedBy : undefined,
+          verifiedAt: nextDone ? new Date().toISOString() : undefined,
+        };
+      });
+
+      addNotification({
+        type: "Evaluation",
+        subject: `Objective ${nextDone ? "Passed" : "Reset"}: "${target.text}"`,
+        body: `Objective "${target.text}" was ${nextDone ? "verified and checked as Passed" : "reset to unchecked"} by ${verifiedBy}. Recorded in Performance Evaluation Dashboard.`,
+        status: "Sent",
+        audience: ["admin", "superadmin", "user"],
+      }, true);
+
+      return updated;
+    });
+  };
+
+  const resetEvalObjectives = () => {
+    setEvalObjectives(INITIAL_EVAL_OBJECTIVES);
+    showToast({
+      type: "info",
+      title: "Evaluation Objectives Reset",
+      message: "All drill performance objectives have been reset to unchecked.",
+    });
+  };
 
   const markNotificationRead = (id: string) => setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
   const markAllNotificationsRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })));
@@ -700,10 +793,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     <AppContext.Provider value={{ 
       programs, sessions, participants, notifications, attendanceRecords, assessorEvaluations, 
       accounts, toast, darkMode, toggleDarkMode, showToast, dismissToast,
-      addProgram, updateProgram, deleteProgram, createSession, updateSession, cancelSession, launchSession, 
+      addProgram, updateProgram, deleteProgram, createSession, updateSession, cancelSession, launchSession, deleteSession, 
       registerParticipant, addNotification, exportCSV, addUser, addAccount, updateAccount,
       markNotificationRead, markAllNotificationsRead, clearNotification, clearAllNotifications, 
-      addAttendanceRecord, getAttendanceFor, submitAssessorEvaluation, getEvaluationsFor 
+      addAttendanceRecord, updateAttendanceRecord, removeAttendanceRecord, getAttendanceFor, submitAssessorEvaluation, getEvaluationsFor,
+      evalObjectives, toggleEvalObjective, resetEvalObjectives
     }}>
       {children}
     </AppContext.Provider>

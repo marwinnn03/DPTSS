@@ -92,6 +92,7 @@ type EvalTab = "objectives" | "analytics" | "assessor";
 type ReportTab = "aar" | "compliance" | "trends";
 
 interface AuthUser {
+  id?: string;
   name: string;
   email: string;
   role: Role;
@@ -1108,11 +1109,21 @@ function LoginScreen({
   const [regFullName, setRegFullName] = useState("");
   const [regEmail, setRegEmail] = useState("");
   const [regPassword, setRegPassword] = useState("");
+  const [regConfirmPassword, setRegConfirmPassword] = useState("");
+  const [showRegPw, setShowRegPw] = useState(false);
+  const [showRegConfirmPw, setShowRegConfirmPw] = useState(false);
   const [regRole, setRegRole] = useState<AuthRole>("user");
 
   // Error and UI States
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
+
+  // Password Requirements Validation
+  const hasMinLength = regPassword.length >= 8;
+  const hasUpperAndLower = /[a-z]/.test(regPassword) && /[A-Z]/.test(regPassword);
+  const hasLettersAndNumbers = /[a-zA-Z]/.test(regPassword) && /[0-9]/.test(regPassword);
+  const hasSpecialChar = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(regPassword);
+  const isPasswordValid = hasMinLength && hasUpperAndLower && hasLettersAndNumbers && hasSpecialChar;
 
   useEffect(() => {
     setAuthMode(initialMode);
@@ -1130,6 +1141,7 @@ function LoginScreen({
   const [isSupabaseSending, setIsSupabaseSending] = useState(false);
   const [isSupabaseVerifying, setIsSupabaseVerifying] = useState(false);
   const [otpDeliveryMethod, setOtpDeliveryMethod] = useState<"supabase" | "simulated">("supabase");
+  const [isResetSent, setIsResetSent] = useState(false);
 
   // 120-second countdown effect
   useEffect(() => {
@@ -1190,35 +1202,29 @@ function LoginScreen({
     }
   };
 
-  const generateAndSendOtp = async (account: AuthAccount) => {
+  const generateAndSendOtp = async (account: AuthAccount, purpose: "login" | "register" = "login") => {
     setIsSupabaseSending(true);
     setError("");
     setPendingAccount(account);
     setOtpInput("");
     setOtpTimeLeft(120);
+    setOtpPurpose(purpose);
 
     // Fallback/Testing code (guarantees seamless access for demo/evaluation/offline)
     const localCode = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedOtp(localCode);
 
-    try {
-      // 1. Call Supabase built-in Auth OTP
-      let { data, error: sbError } = await supabase.auth.signInWithOtp({
-        email: account.email,
-        options: {
-          shouldCreateUser: true,
-          emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
-          data: {
-            name: account.name,
-            role: account.role,
-            dept: account.dept,
-          },
-        },
-      });
+    // Domain aware redirect URL targeting dptss.culiatpublicsafety.com
+    const redirectUrl = typeof window !== "undefined" && window.location.origin.includes("culiatpublicsafety.com")
+      ? window.location.origin
+      : "https://dptss.culiatpublicsafety.com";
 
-      // 2. If rejected with "Signups not allowed for otp", attempt registering via signUp
-      if (sbError && sbError.message.toLowerCase().includes("signups not allowed")) {
-        console.warn("Supabase signInWithOtp restricted for unregistered user. Attempting signUp fallback:", sbError.message);
+    let sbError: any = null;
+    let sentSuccess = false;
+
+    try {
+      if (purpose === "register") {
+        // Direct clean call to signUp with metadata for registration
         const { data: suData, error: suError } = await supabase.auth.signUp({
           email: account.email,
           password: account.password || "password123",
@@ -1228,44 +1234,132 @@ function LoginScreen({
               role: account.role,
               dept: account.dept,
             },
-            emailRedirectTo: typeof window !== "undefined" ? window.location.origin : undefined,
+            emailRedirectTo: redirectUrl,
           },
         });
 
         if (!suError && (suData?.user || suData?.session)) {
-          sbError = null; // Successfully created user and dispatched verification OTP email!
+          sentSuccess = true;
         } else if (suError) {
-          console.warn("Supabase signUp fallback note:", suError.message);
+          // If user already registered, fallback to signInWithOtp
+          if (suError.message.toLowerCase().includes("already registered")) {
+            const { data: otpData, error: otpError } = await supabase.auth.signInWithOtp({
+              email: account.email,
+              options: {
+                shouldCreateUser: false,
+                emailRedirectTo: redirectUrl,
+              },
+            });
+            if (!otpError) {
+              sentSuccess = true;
+            } else {
+              sbError = otpError;
+            }
+          } else {
+            sbError = suError;
+          }
+        }
+      } else {
+        // Login OTP
+        const { data, error } = await supabase.auth.signInWithOtp({
+          email: account.email,
+          options: {
+            shouldCreateUser: false,
+            emailRedirectTo: redirectUrl,
+          },
+        });
+        if (!error) {
+          sentSuccess = true;
+        } else {
+          sbError = error;
+          // Fallback if rejected with signups not allowed
+          if (error.message.toLowerCase().includes("signups not allowed")) {
+            const { data: suData, error: suError } = await supabase.auth.signUp({
+              email: account.email,
+              password: account.password || "password123",
+              options: {
+                data: {
+                  name: account.name,
+                  role: account.role,
+                  dept: account.dept,
+                },
+                emailRedirectTo: redirectUrl,
+              },
+            });
+            if (!suError && (suData?.user || suData?.session)) {
+              sentSuccess = true;
+              sbError = null;
+            }
+          }
         }
       }
 
-      if (sbError) {
-        console.warn("Supabase signInWithOtp note:", sbError.message);
+      if (sbError || !sentSuccess) {
+        console.warn("Supabase OTP send note:", sbError?.message || "Using simulated OTP fallback");
         setOtpDeliveryMethod("simulated");
         setStep("otp");
         app.showToast(
-          `Supabase Auth: ${sbError.message}. Using backup verification code: ${localCode}`,
+          `Supabase Auth note: ${sbError?.message || "Verification code ready"}. Using backup verification code: ${localCode}`,
           "warning",
-          "Supabase Auth Notice"
+          "OTP Notification"
         );
       } else {
         setOtpDeliveryMethod("supabase");
         setStep("otp");
         app.showToast(
-          `Supabase OTP sent to ${account.email}. Check your email inbox. Valid for 2 minutes.`,
+          `OTP code sent to ${account.email} via dptss.culiatpublicsafety.com. Please check your email inbox. Valid for 2 mins.`,
           "success",
-          "Supabase Auth OTP Sent"
+          "Verification Email Sent"
         );
       }
     } catch (err: any) {
-      console.warn("Supabase signInWithOtp error:", err);
+      console.warn("Supabase OTP exception:", err);
       setOtpDeliveryMethod("simulated");
       setStep("otp");
       app.showToast(
-        `OTP generated: ${localCode}. Valid for 2 minutes.`,
+        `OTP code generated: ${localCode}. Valid for 2 minutes.`,
         "info",
         "Two-Factor Authentication"
       );
+    } finally {
+      setIsSupabaseSending(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const targetEmail = email.trim();
+    if (!targetEmail) {
+      setError("Please enter your email address above first to receive a password reset link.");
+      return;
+    }
+    setIsSupabaseSending(true);
+    setError("");
+
+    const redirectUrl = typeof window !== "undefined" && window.location.origin.includes("culiatpublicsafety.com")
+      ? `${window.location.origin}/update-password`
+      : "https://dptss.culiatpublicsafety.com/update-password";
+
+    try {
+      const { data, error: resetErr } = await supabase.auth.resetPasswordForEmail(targetEmail, {
+        redirectTo: redirectUrl,
+      });
+
+      if (resetErr) {
+        console.error("Error sa pagpapadala:", resetErr.message);
+        setError(`Error sa pagpapadala: ${resetErr.message}`);
+        app.showToast(`Error sa pagpapadala: ${resetErr.message}`, "error", "Reset Link Failed");
+      } else {
+        console.log("Email sent successfully!", data);
+        setIsResetSent(true);
+        app.showToast(
+          `Password reset link sent to ${targetEmail}! Please check your email inbox and spam folder.`,
+          "success",
+          "Email Sent Successfully"
+        );
+      }
+    } catch (err: any) {
+      console.error("Error sa pagpapadala:", err);
+      setError(`Failed to send reset email: ${err?.message || err}`);
     } finally {
       setIsSupabaseSending(false);
     }
@@ -1334,8 +1428,28 @@ function LoginScreen({
       setError("Please enter a valid email address.");
       return;
     }
-    if (!regPassword || regPassword.length < 6) {
-      setError("Password must be at least 6 characters long.");
+    if (!hasMinLength) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+    if (!hasUpperAndLower) {
+      setError("Password must contain a mixture of upper and lower case letters.");
+      return;
+    }
+    if (!hasLettersAndNumbers) {
+      setError("Password must contain a mixture of letters and numbers.");
+      return;
+    }
+    if (!hasSpecialChar) {
+      setError("Password must contain at least one special character, e.g., ! @ # ? ]");
+      return;
+    }
+    if (!regConfirmPassword) {
+      setError("Please confirm your password.");
+      return;
+    }
+    if (regPassword !== regConfirmPassword) {
+      setError("Passwords do not match.");
       return;
     }
 
@@ -1352,7 +1466,7 @@ function LoginScreen({
       insertUserToSupabase(updatedAccount);
       supabase.auth.signUp({
         email: trimmedEmail,
-        password: regPassword || existing.password || "password123",
+        password: regPassword || existing.password || "Password123!",
         options: { data: { name: updatedAccount.name, role: regRole, dept: updatedAccount.dept } },
       }).catch(e => console.warn("Supabase auth signUp note:", e));
 
@@ -1397,23 +1511,10 @@ function LoginScreen({
     // Insert/sync user to Supabase public.users database table
     insertUserToSupabase(newAcc);
 
-    // Also provision account in Supabase Auth so email OTP is enabled
-    supabase.auth.signUp({
-      email: trimmedEmail,
-      password: regPassword,
-      options: {
-        data: {
-          name: newAcc.name,
-          role: regRole,
-          dept: newAcc.dept,
-        },
-      },
-    }).catch(e => console.warn("Supabase Auth registration notice:", e));
-
     // Require OTP verification before completing registration and redirecting to landing page
     setOtpPurpose("register");
     setError("");
-    generateAndSendOtp(newAcc);
+    generateAndSendOtp(newAcc, "register");
   };
 
   const proceedLogin = (acc: AuthAccount) => {
@@ -1452,6 +1553,7 @@ function LoginScreen({
       setRegFullName("");
       setRegEmail("");
       setRegPassword("");
+      setRegConfirmPassword("");
       setRegRole("user");
       setError("");
       setStep("credentials");
@@ -1486,26 +1588,29 @@ function LoginScreen({
         let verifySuccess = false;
         let verifyErr = "";
 
-        const { data: emailData, error: sbVerifyError } = await supabase.auth.verifyOtp({
+        // Determine primary verification type based on registration vs login
+        const primaryType = otpPurpose === "register" ? "signup" : "email";
+        const secondaryType = otpPurpose === "register" ? "email" : "signup";
+
+        const { data: primData, error: primError } = await supabase.auth.verifyOtp({
           email: pendingAccount.email,
           token: otpInput.trim(),
-          type: "email",
+          type: primaryType as any,
         });
 
-        if (!sbVerifyError && (emailData?.session || emailData?.user)) {
+        if (!primError && (primData?.session || primData?.user)) {
           verifySuccess = true;
         } else {
-          verifyErr = sbVerifyError?.message || "";
-          // If type: email failed, try type: signup in case the OTP was issued via signUp
-          const { data: suData, error: suVerifyError } = await supabase.auth.verifyOtp({
+          verifyErr = primError?.message || "";
+          const { data: secData, error: secError } = await supabase.auth.verifyOtp({
             email: pendingAccount.email,
             token: otpInput.trim(),
-            type: "signup",
+            type: secondaryType as any,
           });
-          if (!suVerifyError && (suData?.session || suData?.user)) {
+          if (!secError && (secData?.session || secData?.user)) {
             verifySuccess = true;
-          } else if (suVerifyError) {
-            verifyErr = suVerifyError.message || verifyErr;
+          } else if (secError) {
+            verifyErr = secError.message || verifyErr;
           }
         }
 
@@ -1617,7 +1722,8 @@ function LoginScreen({
                   } else {
                     setRegFullName("Demo Google User");
                     setRegEmail("google.user@ems.gov");
-                    setRegPassword("password123");
+                    setRegPassword("Password123!");
+                    setRegConfirmPassword("Password123!");
                     app.showToast("Google credentials pre-filled for registration.", "info", "Google Account");
                   }
                 }}
@@ -1680,13 +1786,21 @@ function LoginScreen({
                         {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
-                    <div className="flex justify-end mt-1">
+                    <div className="flex justify-between items-center mt-1">
+                      {isResetSent ? (
+                        <span className="text-[11px] text-emerald-600 font-semibold">
+                          ✓ Reset link sent! Check inbox.
+                        </span>
+                      ) : (
+                        <span />
+                      )}
                       <button
                         type="button"
-                        onClick={() => app.showToast("For password reset assistance, please contact your Barangay Administrator.", "info", "Reset Password")}
-                        className="text-[11px] font-bold text-gray-600 hover:text-gray-950 transition-colors cursor-pointer"
+                        disabled={isSupabaseSending}
+                        onClick={handleForgotPassword}
+                        className="text-[11px] font-bold text-gray-600 hover:text-gray-950 transition-colors cursor-pointer disabled:opacity-50"
                       >
-                        Forgot password?
+                        {isSupabaseSending ? "Sending link..." : "Forgot password?"}
                       </button>
                     </div>
                   </div>
@@ -1791,24 +1905,121 @@ function LoginScreen({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-gray-800 mb-1">Password</label>
+                    <label className="block text-xs font-bold text-gray-800 mb-1">
+                      Password <span className="text-rose-500">*</span>
+                    </label>
                     <div className="relative">
                       <input
-                        type={showPw ? "text" : "password"}
+                        type={showRegPw ? "text" : "password"}
                         value={regPassword}
                         onChange={e => { setRegPassword(e.target.value); setError(""); }}
                         onKeyDown={e => e.key === "Enter" && handleRegisterSubmit()}
                         placeholder="Create a password"
-                        className="w-full bg-[#f8f9f7] border border-gray-200/90 rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-[#0d7d4d] focus:bg-white transition-all shadow-2xs pr-10"
+                        className={`w-full bg-[#f8f9f7] border rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white transition-all shadow-2xs pr-10 ${
+                          regPassword.length > 0 && !isPasswordValid
+                            ? "border-rose-400 focus:border-rose-500"
+                            : "border-gray-200/90 focus:border-[#0d7d4d]"
+                        }`}
                       />
                       <button
                         type="button"
-                        onClick={() => setShowPw(p => !p)}
+                        onClick={() => setShowRegPw(p => !p)}
                         className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                        title={showRegPw ? "Hide password" : "Show password"}
                       >
-                        {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                        {showRegPw ? <EyeOff size={15} /> : <Eye size={15} />}
                       </button>
                     </div>
+
+                    {/* Password Requirements Checklist (matching screenshot) */}
+                    <div className="mt-2.5 space-y-1.5 px-0.5">
+                      <p className="text-[11.5px] font-bold text-gray-800 tracking-tight">
+                        Password must meet the following requirements:
+                      </p>
+                      <div className="space-y-1 text-xs">
+                        {[
+                          { met: hasMinLength, text: "At least 8 characters" },
+                          { met: hasUpperAndLower, text: "Mixture of upper and lower case" },
+                          { met: hasLettersAndNumbers, text: "Mixture of letters and numbers" },
+                          { met: hasSpecialChar, text: "At least one special character, e.g., ! @ # ? ]" },
+                        ].map((req, idx) => {
+                          const isTyped = regPassword.length > 0;
+                          return (
+                            <div
+                              key={idx}
+                              className={`flex items-center gap-1.5 transition-colors duration-200 ${
+                                req.met
+                                  ? "text-emerald-700 font-medium"
+                                  : isTyped
+                                    ? "text-rose-700 font-medium"
+                                    : "text-gray-500"
+                              }`}
+                            >
+                              {req.met ? (
+                                <Check size={14} className="shrink-0 stroke-[2.5] text-emerald-600" />
+                              ) : isTyped ? (
+                                <X size={14} className="shrink-0 stroke-[2.5] text-rose-600" />
+                              ) : (
+                                <span className="w-3.5 h-3.5 flex items-center justify-center shrink-0 text-gray-400 text-xs">
+                                  ✓
+                                </span>
+                              )}
+                              <span className="text-[11.5px] leading-snug">{req.text}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-gray-800 mb-1">
+                      Confirm password <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showRegConfirmPw ? "text" : "password"}
+                        value={regConfirmPassword}
+                        onChange={e => { setRegConfirmPassword(e.target.value); setError(""); }}
+                        onKeyDown={e => e.key === "Enter" && handleRegisterSubmit()}
+                        placeholder="Re-enter your password"
+                        className={`w-full bg-[#f8f9f7] border rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white transition-all shadow-2xs pr-10 ${
+                          regConfirmPassword && regConfirmPassword !== regPassword
+                            ? "border-rose-400 focus:border-rose-500"
+                            : regConfirmPassword && regConfirmPassword === regPassword
+                              ? "border-emerald-300 focus:border-emerald-600"
+                              : "border-gray-200/90 focus:border-[#0d7d4d]"
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRegConfirmPw(p => !p)}
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 cursor-pointer"
+                        title={showRegConfirmPw ? "Hide confirm password" : "Show confirm password"}
+                      >
+                        {showRegConfirmPw ? <EyeOff size={15} /> : <Eye size={15} />}
+                      </button>
+                    </div>
+
+                    {regConfirmPassword && (
+                      <div
+                        className={`text-[11px] font-medium flex items-center gap-1 mt-1 px-1 transition-colors ${
+                          regPassword === regConfirmPassword ? "text-emerald-700" : "text-rose-700"
+                        }`}
+                      >
+                        {regPassword === regConfirmPassword ? (
+                          <>
+                            <Check size={12} className="stroke-[2.5] text-emerald-600" />
+                            <span>Passwords match</span>
+                          </>
+                        ) : (
+                          <>
+                            <X size={12} className="stroke-[2.5] text-rose-600" />
+                            <span>Passwords do not match</span>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {error && (
@@ -1982,7 +2193,7 @@ function LoginScreen({
                 </button>
                 <button
                   type="button"
-                  onClick={() => pendingAccount && generateAndSendOtp(pendingAccount)}
+                  onClick={() => pendingAccount && generateAndSendOtp(pendingAccount, otpPurpose)}
                   className="text-[#0d7d4d] hover:text-[#0b6a41] font-bold flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <RefreshCw size={12} />
@@ -2002,11 +2213,6 @@ function LoginScreen({
   );
 }
 
-const userSessions = [
-  { id: "SES-001", name: "Basic Earthquake Response", date: "Jul 03, 2026", time: "08:00–12:00", location: "District 4 EOC", type: "In-person", status: "Scheduled", level: "Basic", assessor: "Eval. Torres" },
-  { id: "SES-004", name: "Mass Casualty Management", date: "Jul 15, 2026", time: "08:00–16:00", location: "General Hospital Annex", type: "In-person", status: "Scheduled", level: "Intermediate", assessor: "Eval. Lim" },
-];
-
 const upcomingBrowse = [
   { id: "SES-002", name: "Advanced Flood Evacuation", date: "Jul 08", slots: 11, type: "Virtual", level: "Advanced", desc: "Flood zone mapping, evacuation route planning, and victim rescue in swift water conditions." },
   { id: "SES-003", name: "Hazmat Level 2", date: "Jul 10", slots: 13, type: "In-person", level: "Advanced", desc: "HAZMAT identification, decontamination procedures, and chemical agent response." },
@@ -2014,23 +2220,34 @@ const upcomingBrowse = [
   { id: "SES-006", name: "Typhoon Preparedness 101", date: "Jul 22", slots: 28, type: "Virtual", level: "Basic", desc: "Typhoon watch protocols, shelter-in-place guidance, and community evacuation." },
 ];
 
-const userScores = [
-  { drill: "D1", score: 71 }, { drill: "D2", score: 78 }, { drill: "D3", score: 75 },
-  { drill: "D4", score: 82 }, { drill: "D5", score: 88 }, { drill: "D6", score: 94 },
-];
-
-const userObjectives = [
-  { text: "Incident Commander assumes command on radio net", done: true, time: "1:42", limit: "2 min" },
-  { text: "Gas valve shut off at utility panel", done: true, time: "1:58", limit: "2 min" },
-  { text: "Evacuation route cleared and opened", done: false, time: "6:12", limit: "5 min" },
-  { text: "Triage zone established with START protocol", done: true, time: "4:31", limit: "5 min" },
-  { text: "SITREP transmitted to EOC", done: true, time: "9:05", limit: "10 min" },
-];
-
 function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }) {
   const app = useApp();
   const [mod, setMod] = useState<UserModule>("myDashboard");
-  const [signedUp, setSignedUp] = useState<string[]>(["SES-001", "SES-004"]);
+  const [signedUp, setSignedUp] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`dptss_signed_up_${auth.name}`);
+      if (saved) return JSON.parse(saved);
+    } catch { }
+    return [];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`dptss_signed_up_${auth.name}`, JSON.stringify(signedUp));
+    } catch { }
+  }, [signedUp, auth.name]);
+
+  useEffect(() => {
+    const userRecords = app.attendanceRecords.filter(
+      r => (r.participantName?.toLowerCase() === auth.name.toLowerCase() || (auth.id && r.participantId === auth.id)) &&
+        (r.status === "Enrolled" || r.status === "In Progress" || r.status === "Completed")
+    );
+    const sessionIds = userRecords.map(r => r.sessionId || r.id).filter(Boolean) as string[];
+    if (sessionIds.length > 0) {
+      setSignedUp(prev => Array.from(new Set([...prev, ...sessionIds])));
+    }
+  }, [app.attendanceRecords, auth.name, auth.id]);
+
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [withdrawTarget, setWithdrawTarget] = useState<WithdrawTarget | null>(null);
@@ -2040,10 +2257,256 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
   const [smsEnabled, setSmsEnabled] = useState(true);
   const [pushEnabled, setPushEnabled] = useState(true);
   const [sentAlerts, setSentAlerts] = useState<{ id: string; channel: "SMS" | "Push"; subject: string; body: string; date: string }[]>([]);
-  const myAttendance = app.getAttendanceFor(auth.name);
-  const myCompleted = myAttendance.filter(r => r.status === "Completed");
+  const [drillSearch, setDrillSearch] = useState("");
 
-  const myUpcoming = userSessions.filter(s => signedUp.includes(s.id));
+  const myAttendance = useMemo(() => {
+    return app.attendanceRecords.filter(r =>
+      (r.participantName && r.participantName.toLowerCase() === auth.name.toLowerCase()) ||
+      (auth.id && r.participantId === auth.id) ||
+      (auth.email && r.participantId?.toLowerCase() === auth.email.toLowerCase())
+    );
+  }, [app.attendanceRecords, auth.name, auth.id, auth.email]);
+
+  const myCompleted = useMemo(() => myAttendance.filter(r => r.status === "Completed"), [myAttendance]);
+
+  // Dynamically map app.programs (including Supabase live programs like "Fire Prevention Drill")
+  const dynamicProgramDrills = useMemo(() => {
+    return app.programs.map((p, idx) => {
+      const matchingSession = app.sessions.find(s => s.course === p.title || s.id === p.id);
+      return {
+        id: p.id || `PRG-${idx}`,
+        name: p.title,
+        date: matchingSession ? matchingSession.date : (p.createdDate ? new Date(p.createdDate).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Upcoming"),
+        time: matchingSession ? matchingSession.time : "08:00–12:00",
+        location: matchingSession ? matchingSession.location : "Barangay Culiat Evacuation & Training Center",
+        slots: matchingSession ? Math.max(0, matchingSession.capacity - matchingSession.enrolled) : 25,
+        type: p.disasterType ? `${p.disasterType} Drill` : (matchingSession?.sessionType || "In-person"),
+        level: p.level || "Basic",
+        desc: p.description || "Official disaster preparedness training drill open for community and responder enrollment.",
+        assessor: p.assessor || matchingSession?.trainer || "Safety Officer",
+        status: p.status || "Active",
+        duration: p.duration || `${(p.modules || 4) * 2} hrs`,
+        modules: p.modules || 4,
+        source: "Admin-Added" as const,
+      };
+    });
+  }, [app.programs, app.sessions]);
+
+  // Combine newly added programs with seed drills
+  const allBrowseDrills = useMemo(() => {
+    const seedFormatted = upcomingBrowse.map(d => ({
+      ...d,
+      time: "09:00–13:00",
+      location: "District 4 Field HQ",
+      assessor: "Safety Officer",
+      duration: "4 hrs",
+      modules: 4,
+      source: "Seed Catalog" as const,
+    }));
+    return [
+      ...dynamicProgramDrills,
+      ...seedFormatted.filter(ub => !dynamicProgramDrills.some(dp => dp.name.toLowerCase() === ub.name.toLowerCase()))
+    ];
+  }, [dynamicProgramDrills]);
+
+  const filteredBrowseDrills = useMemo(() => {
+    if (!drillSearch.trim()) return allBrowseDrills;
+    const q = drillSearch.toLowerCase();
+    return allBrowseDrills.filter(d =>
+      d.name.toLowerCase().includes(q) ||
+      d.desc.toLowerCase().includes(q) ||
+      d.type.toLowerCase().includes(q) ||
+      d.level.toLowerCase().includes(q)
+    );
+  }, [allBrowseDrills, drillSearch]);
+
+  // Live Enrolled Sessions combining live attendance records and signed up drills
+  const myEnrolledSessions = useMemo(() => {
+    const sessionsList: Array<{
+      id: string;
+      attendanceId?: string;
+      name: string;
+      date: string;
+      time: string;
+      location: string;
+      type: string;
+      status: string;
+      level: string;
+      assessor?: string;
+    }> = [];
+
+    const addedKeys = new Set<string>();
+
+    // 1. From live attendance records (Enrolled or In Progress)
+    myAttendance
+      .filter(r => r.status === "Enrolled" || r.status === "In Progress")
+      .forEach(r => {
+        const idKey = r.sessionId || r.id;
+        addedKeys.add(idKey.toLowerCase());
+        addedKeys.add(r.program.toLowerCase());
+
+        const matchingS = app.sessions.find(s => s.id === r.sessionId || s.course.toLowerCase() === r.program.toLowerCase());
+        const matchingB = allBrowseDrills.find(b => b.id === r.sessionId || b.name.toLowerCase() === r.program.toLowerCase());
+        const matchingP = app.programs.find(p => p.id === r.sessionId || p.title.toLowerCase() === r.program.toLowerCase());
+
+        const formattedDate = matchingS ? matchingS.date : (matchingB ? matchingB.date : (r.date ? new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Upcoming"));
+
+        sessionsList.push({
+          id: idKey,
+          attendanceId: r.id,
+          name: r.program,
+          date: formattedDate,
+          time: matchingS?.time || matchingB?.time || "08:00–12:00",
+          location: matchingS?.location || matchingB?.location || "Barangay Culiat Center",
+          type: matchingB?.type || matchingS?.sessionType || "In-person",
+          status: r.status,
+          level: matchingB?.level || matchingP?.level || "Basic",
+          assessor: r.assessor || matchingB?.assessor || matchingS?.trainer || "Safety Officer",
+        });
+      });
+
+    // 2. From signedUp IDs
+    signedUp.forEach(drillId => {
+      if (addedKeys.has(drillId.toLowerCase())) return;
+      const matchingB = allBrowseDrills.find(b => b.id === drillId);
+      const matchingS = app.sessions.find(s => s.id === drillId);
+      const matchingP = app.programs.find(p => p.id === drillId);
+
+      const name = matchingB?.name || matchingS?.course || matchingP?.title || drillId;
+      if (addedKeys.has(name.toLowerCase())) return;
+      addedKeys.add(drillId.toLowerCase());
+      addedKeys.add(name.toLowerCase());
+
+      sessionsList.push({
+        id: drillId,
+        name,
+        date: matchingS?.date || matchingB?.date || "Upcoming",
+        time: matchingS?.time || matchingB?.time || "08:00–12:00",
+        location: matchingS?.location || matchingB?.location || "Barangay Culiat Center",
+        type: matchingB?.type || matchingS?.sessionType || "In-person",
+        status: "Scheduled",
+        level: matchingB?.level || matchingP?.level || "Basic",
+        assessor: matchingB?.assessor || matchingS?.trainer || "Safety Officer",
+      });
+    });
+
+    return sessionsList;
+  }, [myAttendance, signedUp, app.sessions, allBrowseDrills, app.programs]);
+
+  // Live Performance Stats calculated dynamically from Admin Attendance Records and Assessor Submissions
+  const userPerfStats = useMemo(() => {
+    let assessorSubmissions: any[] = [];
+    try {
+      const saved = localStorage.getItem("dptss_assessor_submissions");
+      if (saved) assessorSubmissions = JSON.parse(saved);
+    } catch { }
+
+    const userSubmissions = assessorSubmissions.filter(s =>
+      s.name?.toLowerCase() === auth.name.toLowerCase()
+    );
+
+    const scoredAtt = myAttendance.filter(r => typeof r.score === "number" && r.score > 0);
+
+    const drillHistoryMap = new Map<string, {
+      drill: string;
+      date: string;
+      score: number;
+      result: string;
+      assessor: string;
+    }>();
+
+    scoredAtt.forEach(r => {
+      const dateStr = r.date ? new Date(r.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "Recent";
+      drillHistoryMap.set(r.program.toLowerCase(), {
+        drill: r.program,
+        date: dateStr,
+        score: r.score!,
+        result: r.score! >= 75 ? "Passed" : "Needs Improvement",
+        assessor: r.assessor || "Safety Assessor",
+      });
+    });
+
+    userSubmissions.forEach(s => {
+      const key = "earthquake response — advanced";
+      if (!drillHistoryMap.has(key)) {
+        drillHistoryMap.set(key, {
+          drill: "Earthquake Response — Advanced",
+          date: s.date || "Recent",
+          score: s.score,
+          result: s.score >= 75 ? "Passed" : "Needs Improvement",
+          assessor: "Admin Assessor",
+        });
+      } else {
+        const existing = drillHistoryMap.get(key)!;
+        existing.score = s.score;
+        existing.result = s.score >= 75 ? "Passed" : "Needs Improvement";
+      }
+    });
+
+    const drillHistory = Array.from(drillHistoryMap.values());
+    const allScores = drillHistory.map(d => d.score);
+
+    const drillsCompleted = Math.max(myCompleted.length, drillHistory.length);
+    const latestScoreNum = allScores.length > 0 ? allScores[0] : null;
+    const avgScoreNum = allScores.length > 0 ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : null;
+    const passRateNum = allScores.length > 0 ? Math.round((allScores.filter(s => s >= 75).length / allScores.length) * 100) : null;
+    const certCount = myAttendance.filter(r => r.certificate).length;
+
+    const scoreHistoryData = drillHistory.map((d, i) => ({
+      drill: `D${drillHistory.length - i}`,
+      score: d.score,
+      name: d.drill,
+    })).reverse();
+
+    const latestSub = userSubmissions[0];
+    let compScores = {
+      command: 0,
+      protocol: 0,
+      speed: 0,
+      comm: 0,
+      coord: 0,
+    };
+
+    if (latestSub?.scores) {
+      compScores = {
+        command: latestSub.scores.Command ?? avgScoreNum ?? 85,
+        protocol: latestSub.scores.Protocols ?? avgScoreNum ?? 90,
+        speed: latestSub.scores["Response Speed"] ?? avgScoreNum ?? 80,
+        comm: latestSub.scores.Communication ?? avgScoreNum ?? 88,
+        coord: latestSub.scores.Coordination ?? avgScoreNum ?? 86,
+      };
+    } else if (avgScoreNum !== null) {
+      compScores = {
+        command: Math.min(100, Math.max(60, avgScoreNum + 2)),
+        protocol: Math.min(100, Math.max(60, avgScoreNum + 4)),
+        speed: Math.min(100, Math.max(60, avgScoreNum - 3)),
+        comm: Math.min(100, Math.max(60, avgScoreNum + 1)),
+        coord: Math.min(100, Math.max(60, avgScoreNum)),
+      };
+    }
+
+    const competencyAreas = [
+      { area: "Command & Control", score: compScores.command },
+      { area: "Protocol Adherence", score: compScores.protocol },
+      { area: "Response Speed", score: compScores.speed },
+      { area: "Communication", score: compScores.comm },
+      { area: "Team Coordination", score: compScores.coord },
+    ];
+
+    return {
+      drillsCompleted,
+      latestScore: latestScoreNum !== null ? `${latestScoreNum}%` : "—",
+      avgScore: avgScoreNum !== null ? `${avgScoreNum}%` : "—",
+      passRate: passRateNum !== null ? `${passRateNum}%` : "—",
+      certCount,
+      drillHistory,
+      scoreHistoryData,
+      competencyAreas,
+      hasScores: allScores.length > 0,
+    };
+  }, [myAttendance, myCompleted, auth.name]);
+
+  const myUpcoming = myEnrolledSessions;
   const eventReminders = myUpcoming.map(s => ({
     id: `evt-${s.id}`,
     channel: "SMS" as const,
@@ -2085,15 +2548,68 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 
   const handleSignUp = (drillId: string, drillName: string) => {
     setSignedUp(prev => prev.includes(drillId) ? prev : [...prev, drillId]);
+
+    // 1. Ensure participant profile exists in app.participants for Admin visibility
+    const existingP = app.participants.find(
+      p => p.name.toLowerCase() === auth.name.toLowerCase() || (auth.email && p.email?.toLowerCase() === auth.email.toLowerCase())
+    );
+    if (!existingP) {
+      app.registerParticipant({
+        name: auth.name,
+        email: auth.email || `${auth.name.toLowerCase().replace(/\s+/g, ".")}@culiat.gov.ph`,
+        dept: auth.dept || "Community Residents",
+        role: auth.role === "user" ? "Resident" : auth.role,
+        level: "Basic",
+        status: "Active",
+      });
+    }
+
+    // 2. Add or reactivate attendance record with status "Enrolled" for the Admin Self-Service Portal
+    const existingRecord = app.attendanceRecords.find(
+      r => (r.participantName.toLowerCase() === auth.name.toLowerCase() || (auth.id && r.participantId === auth.id)) &&
+        (r.program.toLowerCase() === drillName.toLowerCase() || r.sessionId === drillId)
+    );
+
+    if (!existingRecord) {
+      app.addAttendanceRecord({
+        participantName: auth.name,
+        participantId: auth.id || `P-${auth.name.replace(/\s+/g, "").toUpperCase().slice(0, 8)}`,
+        program: drillName,
+        sessionId: drillId,
+        date: new Date().toISOString().slice(0, 10),
+        status: "Enrolled",
+      });
+    } else if (existingRecord.status !== "Enrolled" && existingRecord.status !== "Completed") {
+      app.updateAttendanceRecord(existingRecord.id, { status: "Enrolled" });
+    }
+
+    // 3. Update session capacity in app.sessions if matching session exists
+    const matchingSession = app.sessions.find(s => s.id === drillId || s.course.toLowerCase() === drillName.toLowerCase());
+    if (matchingSession) {
+      app.updateSession(matchingSession.id, {
+        enrolled: Math.min(matchingSession.capacity, (matchingSession.enrolled || 0) + 1),
+      });
+    }
+
+    // 4. Send targeted notifications
+    app.addNotification({
+      type: "Registration",
+      subject: `New Self-Service Application: ${auth.name} applied for "${drillName}"`,
+      body: `Applicant: ${auth.name} (${auth.dept || "Community Residents"})\nProgram: ${drillName}\nSession ID: ${drillId}\nApplication submitted via Self-Service Portal (Browse Drills). This applicant is now listed in Participant Registration > Self-Service Portal.`,
+      status: "Sent",
+      audience: ["admin", "superadmin"],
+    }, false);
+
     app.addNotification({
       type: "Registration",
       subject: `Enrolled: ${drillName}`,
       body: `You have successfully applied and reserved a slot for "${drillName}" (Session ID: ${drillId}). Arrive 15 minutes prior to start time with your required gear.`,
       status: "Sent",
-      audience: ["user", "admin", "superadmin"],
+      audience: ["user"],
     }, true);
+
     app.showToast(
-      `Application confirmed! You have successfully enrolled in "${drillName}".`,
+      `Application confirmed! You have successfully enrolled in "${drillName}". Sent to Admin Self-Service Portal.`,
       "success",
       "Training Application Confirmed"
     );
@@ -2101,13 +2617,30 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 
   const handleWithdraw = (drillId: string, drillName: string) => {
     setSignedUp(prev => prev.filter(x => x !== drillId));
+
+    const existingRecord = app.attendanceRecords.find(
+      r => (r.participantName.toLowerCase() === auth.name.toLowerCase() || (auth.id && r.participantId === auth.id)) &&
+        (r.program.toLowerCase() === drillName.toLowerCase() || r.sessionId === drillId || r.id === drillId)
+    );
+    if (existingRecord) {
+      app.removeAttendanceRecord(existingRecord.id);
+    }
+
+    const matchingSession = app.sessions.find(s => s.id === drillId || s.course.toLowerCase() === drillName.toLowerCase());
+    if (matchingSession && matchingSession.enrolled > 0) {
+      app.updateSession(matchingSession.id, {
+        enrolled: Math.max(0, matchingSession.enrolled - 1),
+      });
+    }
+
     app.addNotification({
       type: "Withdrawal",
       subject: `${auth.name} withdrew from ${drillName}`,
-      body: `${auth.name} (${auth.dept}) withdrew from session ${drillId} — ${drillName}. The roster and headcount have been updated.`,
+      body: `${auth.name} (${auth.dept || "Community Residents"}) withdrew from session ${drillId} — ${drillName}. Headcount and slot updated in Admin Self-Service Portal.`,
       status: "Sent",
       audience: ["admin", "superadmin"],
     }, true);
+
     app.showToast(
       `You have withdrawn from "${drillName}".`,
       "info",
@@ -2313,14 +2846,14 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                 <div className="space-y-5">
                   <div>
                     <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">WELCOME BACK, {auth.name.split(" ")[0].toUpperCase()}</h1>
-                    <p className="text-muted-foreground text-sm mt-0.5">{auth.dept} · Participant Portal · June 30, 2026</p>
+                    <p className="text-muted-foreground text-sm mt-0.5">{auth.dept} · Participant Portal · {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</p>
                   </div>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                     {[
-                      { label: "Sessions Enrolled", value: signedUp.length, icon: Calendar, color: "text-primary" },
-                      { label: "Drills Completed", value: String(myCompleted.length), icon: CheckCircle, color: "text-green-400" },
-                      { label: "Latest Score", value: "94%", icon: Star, color: "text-primary" },
-                      { label: "Certifications", value: "3", icon: Award, color: "text-blue-400" },
+                      { label: "Sessions Enrolled", value: myEnrolledSessions.length, icon: Calendar, color: "text-primary" },
+                      { label: "Drills Completed", value: String(userPerfStats.drillsCompleted), icon: CheckCircle, color: "text-green-400" },
+                      { label: "Latest Score", value: userPerfStats.latestScore, icon: Star, color: "text-primary" },
+                      { label: "Certifications", value: String(userPerfStats.certCount), icon: Award, color: "text-blue-400" },
                     ].map(s => (
                       <div key={s.label} className="bg-card border border-border rounded-lg p-5">
                         <div className="flex items-center justify-between mb-3">
@@ -2334,45 +2867,77 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className="bg-card border border-border rounded-lg p-5">
                       <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">My Score Trend</h3>
-                      <ResponsiveContainer width="100%" height={160}>
-                        <AreaChart data={userScores} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                          <defs>
-                            <linearGradient id="user-dash-score-grad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#f0a500" stopOpacity={0.2} /><stop offset="95%" stopColor="#f0a500" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
-                          <XAxis dataKey="drill" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-                          <YAxis domain={[60, 100]} tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }} />
-                          <Area key="area-user-dash-score" type="monotone" dataKey="score" name="Score" stroke="#f0a500" fill="url(#user-dash-score-grad)" strokeWidth={2} dot={{ fill: "#f0a500", r: 3 }} />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                      {userPerfStats.hasScores ? (
+                        <ResponsiveContainer width="100%" height={160}>
+                          <AreaChart data={userPerfStats.scoreHistoryData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                            <defs>
+                              <linearGradient id="user-dash-score-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#f0a500" stopOpacity={0.2} /><stop offset="95%" stopColor="#f0a500" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
+                            <XAxis dataKey="drill" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+                            <YAxis domain={[50, 100]} tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+                            <Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }} />
+                            <Area key="area-user-dash-score" type="monotone" dataKey="score" name="Score" stroke="#f0a500" fill="url(#user-dash-score-grad)" strokeWidth={2} dot={{ fill: "#f0a500", r: 3 }} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-40 flex flex-col items-center justify-center text-center p-4 border border-dashed border-border rounded-lg bg-secondary/30">
+                          <BarChart3 size={24} className="text-muted-foreground mb-2 opacity-50" />
+                          <p className="text-xs text-muted-foreground">No evaluation scores yet.</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Complete an enrolled drill to view your score trend.</p>
+                        </div>
+                      )}
                     </div>
                     <div className="bg-card border border-border rounded-lg p-5">
-                      <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Upcoming Sessions</h3>
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Upcoming Sessions</h3>
+                        {myEnrolledSessions.length > 0 && (
+                          <button onClick={() => setMod("mySessions")} className="text-[11px] font-mono text-primary hover:underline flex items-center gap-0.5">
+                            View All ({myEnrolledSessions.length}) <ChevronRight size={12} />
+                          </button>
+                        )}
+                      </div>
                       <div className="space-y-2">
-                        {userSessions.map(s => (
-                          <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-md bg-secondary/60">
-                            <div className="w-8 h-8 rounded-md bg-primary/15 flex items-center justify-center text-[12px] font-mono text-primary font-bold">{s.date.split(", ")[0].split(" ")[1]}</div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-xs font-semibold text-foreground truncate">{s.name}</div>
-                              <div className="text-[12px] font-mono text-muted-foreground">{s.date} · {s.type}</div>
-                            </div>
-                            <Badge status="Scheduled">Scheduled</Badge>
+                        {myEnrolledSessions.length === 0 ? (
+                          <div className="py-8 flex flex-col items-center justify-center text-center p-4 border border-dashed border-border rounded-lg bg-secondary/30">
+                            <Calendar size={22} className="text-muted-foreground mb-2 opacity-50" />
+                            <p className="text-xs text-muted-foreground">No enrolled sessions yet.</p>
+                            <button onClick={() => setMod("browsedrills")} className="mt-2 text-xs font-semibold text-primary hover:underline">
+                              Browse available drills &rarr;
+                            </button>
                           </div>
-                        ))}
+                        ) : (
+                          myEnrolledSessions.slice(0, 3).map(s => (
+                            <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-md bg-secondary/60">
+                              <div className="w-8 h-8 rounded-md bg-primary/15 flex items-center justify-center text-[12px] font-mono text-primary font-bold">
+                                {s.date.includes(" ") ? s.date.split(" ")[1]?.replace(",", "") || s.date.slice(0, 2) : s.date.slice(0, 2)}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-semibold text-foreground truncate">{s.name}</div>
+                                <div className="text-[12px] font-mono text-muted-foreground">{s.date} · {s.type}</div>
+                              </div>
+                              <Badge status={s.status}>{s.status}</Badge>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </div>
                   </div>
                   <div className="bg-card border border-border rounded-lg p-5">
-                    <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Last Drill Objectives — Earthquake Response</h3>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Training Drill Objectives Status</h3>
+                      <span className="text-[11px] font-mono text-muted-foreground flex items-center gap-1">
+                        <ShieldCheck size={12} className="text-primary" /> Admin Verified
+                      </span>
+                    </div>
                     <div className="space-y-2">
-                      {userObjectives.map((o, i) => (
-                        <div key={i} className={`flex items-center gap-3 p-2.5 rounded-md ${o.done ? "bg-green-500/5 border border-green-500/10" : "bg-red-500/5 border border-red-500/10"}`}>
-                          {o.done ? <CheckCircle size={15} className="text-green-400 flex-shrink-0" /> : <XCircle size={15} className="text-red-400 flex-shrink-0" />}
-                          <span className="flex-1 text-xs text-foreground">{o.text}</span>
-                          <span className={`text-xs font-mono font-bold ${o.done ? "text-green-400" : "text-red-400"}`}>{o.time}</span>
+                      {app.evalObjectives.map((o) => (
+                        <div key={o.id} className={`flex items-center gap-3 p-2.5 rounded-md ${o.done ? "bg-green-500/5 border border-green-500/10" : "bg-secondary/40 border border-border"}`}>
+                          {o.done ? <CheckCircle size={15} className="text-green-400 flex-shrink-0" /> : <XCircle size={15} className="text-muted-foreground flex-shrink-0" />}
+                          <span className={`flex-1 text-xs ${o.done ? "text-foreground font-medium" : "text-muted-foreground"}`}>{o.text}</span>
+                          <span className={`text-xs font-mono font-bold ${o.done ? "text-green-400" : "text-muted-foreground"}`}>{o.time}</span>
                           <span className="text-[12px] font-mono text-muted-foreground">/ {o.limit}</span>
                         </div>
                       ))}
@@ -2383,43 +2948,78 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 
               {mod === "mySessions" && (
                 <div className="space-y-5">
-                  <div>
-                    <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">MY SESSIONS</h1>
-                    <p className="text-muted-foreground text-sm mt-0.5">Your enrolled training sessions and completion history</p>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div>
+                      <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">MY SESSIONS</h1>
+                      <p className="text-muted-foreground text-sm mt-0.5">Your enrolled training sessions and completion history</p>
+                    </div>
+                    <button
+                      onClick={() => setMod("browsedrills")}
+                      className="self-start sm:self-auto px-3.5 py-1.5 rounded-md bg-primary text-black font-semibold text-xs flex items-center gap-1.5 hover:bg-primary/90 transition-colors shadow-xs"
+                    >
+                      <Search size={14} /> Browse Available Drills
+                    </button>
                   </div>
+
                   <div className="space-y-3">
-                    {userSessions.map(s => (
-                      <div key={s.id} className="bg-card border border-border rounded-lg p-4 hover:border-[rgba(240,165,0,0.25)] transition-colors">
-                        <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex flex-col items-center justify-center flex-shrink-0">
-                            <div className="text-xs font-mono text-muted-foreground">{s.date.split(" ")[0]}</div>
-                            <div className="text-lg font-bold font-display text-primary leading-none">{s.date.split(" ")[1].replace(",", "")}</div>
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <h3 className="text-sm font-semibold text-foreground">{s.name}</h3>
-                              <Badge status={s.status}>{s.status}</Badge>
-                              <Badge status={s.level}>{s.level}</Badge>
-                            </div>
-                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-muted-foreground">
-                              <span className="flex items-center gap-1"><Clock size={12} />{s.time}</span>
-                              <span className="flex items-center gap-1"><MapPin size={12} />{s.location}</span>
-                              <span className="flex items-center gap-1"><Globe size={12} />{s.type}</span>
-                            </div>
-                            {s.assessor && (
-                              <div className="flex items-center gap-1.5 mt-2 text-[12px] font-mono text-muted-foreground">
-                                <UserCheck size={12} className="text-primary" />
-                                <span>Evaluation Assessor: <span className="text-foreground">{s.assessor}</span></span>
-                              </div>
-                            )}
-                          </div>
-                          <button onClick={() => setWithdrawTarget({ id: s.id, name: s.name, date: s.date, time: s.time, location: s.location })}
-                            className="text-xs text-red-400 hover:text-red-300 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20 transition-colors flex items-center gap-1.5">
-                            <X size={13} />Withdraw
-                          </button>
+                    {myEnrolledSessions.length === 0 ? (
+                      <div className="bg-card border border-dashed border-border rounded-lg p-8 text-center flex flex-col items-center justify-center">
+                        <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-3">
+                          <Calendar size={22} />
                         </div>
+                        <h3 className="text-sm font-semibold text-foreground mb-1">No Active Enrolled Sessions</h3>
+                        <p className="text-xs text-muted-foreground max-w-sm mb-4">
+                          You are not currently enrolled in any upcoming training sessions. Browse the available catalog to join disaster drills.
+                        </p>
+                        <button
+                          onClick={() => setMod("browsedrills")}
+                          className="px-4 py-2 rounded-md bg-primary text-black font-semibold text-xs hover:bg-primary/90 transition-colors flex items-center gap-2"
+                        >
+                          <Search size={14} /> Browse Drills Catalog
+                        </button>
                       </div>
-                    ))}
+                    ) : (
+                      myEnrolledSessions.map(s => {
+                        const dateParts = s.date.includes(" ") ? s.date.split(" ") : [s.date, ""];
+                        const monthStr = dateParts[0] || "Drill";
+                        const dayStr = (dateParts[1] || "").replace(",", "");
+
+                        return (
+                          <div key={s.id} className="bg-card border border-border rounded-lg p-4 hover:border-[rgba(240,165,0,0.25)] transition-colors">
+                            <div className="flex items-start gap-4">
+                              <div className="w-12 h-12 rounded-lg bg-primary/10 border border-primary/20 flex flex-col items-center justify-center flex-shrink-0">
+                                <div className="text-[11px] font-mono text-muted-foreground uppercase">{monthStr.slice(0, 3)}</div>
+                                <div className="text-lg font-bold font-display text-primary leading-none">{dayStr || "—"}</div>
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2 mb-1">
+                                  <h3 className="text-sm font-semibold text-foreground truncate">{s.name}</h3>
+                                  <Badge status={s.status}>{s.status}</Badge>
+                                  <Badge status={s.level}>{s.level}</Badge>
+                                </div>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-muted-foreground">
+                                  <span className="flex items-center gap-1"><Clock size={12} />{s.time}</span>
+                                  <span className="flex items-center gap-1"><MapPin size={12} />{s.location}</span>
+                                  <span className="flex items-center gap-1"><Globe size={12} />{s.type}</span>
+                                </div>
+                                {s.assessor && (
+                                  <div className="flex items-center gap-1.5 mt-2 text-[12px] font-mono text-muted-foreground">
+                                    <UserCheck size={12} className="text-primary" />
+                                    <span>Assessor / Trainer: <span className="text-foreground font-medium">{s.assessor}</span></span>
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => setWithdrawTarget({ id: s.id, name: s.name, date: s.date, time: s.time, location: s.location })}
+                                className="text-xs text-red-400 hover:text-red-300 px-3 py-1.5 rounded-md bg-red-500/10 border border-red-500/20 transition-colors flex items-center gap-1.5 flex-shrink-0 cursor-pointer"
+                              >
+                                <X size={13} />Withdraw
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
 
                   <div className="pt-2">
@@ -2428,7 +3028,9 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                       <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">My Training Attendance Record</h3>
                     </div>
                     {myAttendance.length === 0 ? (
-                      <div className="bg-card border border-border rounded-lg p-4 text-xs text-muted-foreground">No attendance records yet. Completed and in-progress drills will appear here.</div>
+                      <div className="bg-card border border-border rounded-lg p-4 text-xs text-muted-foreground">
+                        No attendance records yet. Completed and evaluated drills recorded on the admin side will appear here.
+                      </div>
                     ) : (
                       <div className="space-y-2">
                         {myAttendance.map(r => (
@@ -2437,7 +3039,7 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                               <div className="flex items-center gap-3 sm:block">
                                 <div className="w-12 h-12 rounded-lg bg-secondary flex flex-col items-center justify-center flex-shrink-0">
                                   <div className="text-xs font-mono text-muted-foreground">{new Date(r.date).toLocaleDateString(undefined, { month: "short" })}</div>
-                                  <div className="text-lg font-bold font-display text-muted-foreground leading-none">{new Date(r.date).getDate()}</div>
+                                  <div className="text-lg font-bold font-display text-muted-foreground leading-none">{new Date(r.date).getDate() || 1}</div>
                                 </div>
                                 <div className="sm:hidden flex-1 min-w-0">
                                   <div className="text-sm font-semibold text-foreground truncate">{r.program}</div>
@@ -2451,7 +3053,8 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                                 </div>
                                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-mono text-muted-foreground">
                                   <span>{new Date(r.date).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</span>
-                                  {typeof r.score === "number" && <span className="flex items-center gap-1"><Star size={12} />Score: {r.score}%</span>}
+                                  {typeof r.score === "number" && <span className="flex items-center gap-1 text-green-400"><Star size={12} />Score: {r.score}%</span>}
+                                  {r.assessor && <span>Assessor: {r.assessor}</span>}
                                 </div>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 pt-1 sm:pt-0 sm:self-start">
@@ -2483,10 +3086,10 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                   </div>
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {[
-                      { label: "Latest Score", value: "94%", color: "text-green-400" },
-                      { label: "Avg Score", value: "81%", color: "text-primary" },
-                      { label: "Drills Completed", value: "6", color: "text-foreground" },
-                      { label: "Pass Rate", value: "100%", color: "text-green-400" },
+                      { label: "Latest Score", value: userPerfStats.latestScore, color: "text-green-400" },
+                      { label: "Avg Score", value: userPerfStats.avgScore, color: "text-primary" },
+                      { label: "Drills Completed", value: String(userPerfStats.drillsCompleted), color: "text-foreground" },
+                      { label: "Pass Rate", value: userPerfStats.passRate, color: "text-green-400" },
                     ].map(s => (
                       <div key={s.label} className="bg-card border border-border rounded-lg p-4">
                         <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div>
@@ -2497,38 +3100,45 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     <div className="bg-card border border-border rounded-lg p-5">
                       <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-4">Score History</h3>
-                      <ResponsiveContainer width="100%" height={200}>
-                        <AreaChart data={userScores} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-                          <defs>
-                            <linearGradient id="user-perf-score-grad" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#f0a500" stopOpacity={0.2} /><stop offset="95%" stopColor="#f0a500" stopOpacity={0} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
-                          <XAxis dataKey="drill" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-                          <YAxis domain={[60, 100]} tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
-                          <Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }} />
-                          <Area key="area-user-perf-score" type="monotone" dataKey="score" name="Score" stroke="#f0a500" fill="url(#user-perf-score-grad)" strokeWidth={2} dot={{ fill: "#f0a500", r: 3 }} />
-                        </AreaChart>
-                      </ResponsiveContainer>
+                      {userPerfStats.hasScores ? (
+                        <ResponsiveContainer width="100%" height={200}>
+                          <AreaChart data={userPerfStats.scoreHistoryData} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                            <defs>
+                              <linearGradient id="user-perf-score-grad" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="5%" stopColor="#f0a500" stopOpacity={0.2} /><stop offset="95%" stopColor="#f0a500" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
+                            <XAxis dataKey="drill" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+                            <YAxis domain={[50, 100]} tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+                            <Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }} />
+                            <Area key="area-user-perf-score" type="monotone" dataKey="score" name="Score" stroke="#f0a500" fill="url(#user-perf-score-grad)" strokeWidth={2} dot={{ fill: "#f0a500", r: 3 }} />
+                          </AreaChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="h-48 flex flex-col items-center justify-center text-center p-4 border border-dashed border-border rounded-lg bg-secondary/30">
+                          <BarChart3 size={28} className="text-muted-foreground mb-2 opacity-50" />
+                          <p className="text-xs text-muted-foreground">No score history available yet.</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Your scores will be graphed once an assessor evaluates your drill.</p>
+                        </div>
+                      )}
                     </div>
                     <div className="bg-card border border-border rounded-lg p-5">
                       <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Competency Areas</h3>
                       <div className="space-y-2.5">
-                        {[
-                          { area: "Command & Control", score: 88 },
-                          { area: "Protocol Adherence", score: 94 },
-                          { area: "Response Speed", score: 76 },
-                          { area: "Communication", score: 91 },
-                          { area: "Team Coordination", score: 85 },
-                        ].map(c => (
+                        {userPerfStats.competencyAreas.map(c => (
                           <div key={c.area}>
                             <div className="flex justify-between text-xs mb-1">
                               <span className="text-muted-foreground">{c.area}</span>
-                              <span className={`font-mono font-bold ${c.score >= 80 ? "text-green-400" : c.score >= 65 ? "text-primary" : "text-red-400"}`}>{c.score}</span>
+                              <span className={`font-mono font-bold ${c.score >= 80 ? "text-green-400" : c.score >= 65 ? "text-primary" : c.score > 0 ? "text-red-400" : "text-muted-foreground"}`}>
+                                {c.score > 0 ? c.score : "Pending"}
+                              </span>
                             </div>
                             <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${c.score >= 80 ? "bg-green-400" : c.score >= 65 ? "bg-primary" : "bg-red-400"}`} style={{ width: `${c.score}%` }} />
+                              <div
+                                className={`h-full rounded-full ${c.score >= 80 ? "bg-green-400" : c.score >= 65 ? "bg-primary" : c.score > 0 ? "bg-red-400" : "bg-transparent"}`}
+                                style={{ width: `${Math.min(100, Math.max(0, c.score))}%` }}
+                              />
                             </div>
                           </div>
                         ))}
@@ -2538,25 +3148,24 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                   <div className="bg-card border border-border rounded-lg p-5">
                     <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Drill History</h3>
                     <div className="space-y-2">
-                      {[
-                        { drill: "Earthquake Response — Advanced", date: "Jun 28", score: 94, result: "Passed", assessor: "Eval. Torres" },
-                        { drill: "Flood Evacuation Protocol", date: "Jun 22", score: 88, result: "Passed", assessor: "Eval. Lim" },
-                        { drill: "Hazmat Level 1", date: "Jun 08", score: 82, result: "Passed", assessor: "Eval. Torres" },
-                        { drill: "SAR Night Ops", date: "May 30", score: 78, result: "Passed", assessor: "Eval. Cruz" },
-                        { drill: "Mass Casualty", date: "May 15", score: 75, result: "Passed", assessor: "Eval. Lim" },
-                        { drill: "Basic First Response", date: "Apr 20", score: 71, result: "Passed", assessor: "Eval. Torres" },
-                      ].map((h, i) => (
-                        <div key={i} className="flex items-center gap-4 p-2.5 rounded-md bg-secondary/50 hover:bg-secondary transition-colors">
-                          <span className="text-[12px] font-mono text-muted-foreground w-12">{h.date}</span>
-                          <span className="flex-1 text-xs text-foreground">{h.drill}</span>
-                          <span className="text-[12px] font-mono text-muted-foreground">by {h.assessor}</span>
-                          <div className="w-16 h-1.5 bg-background rounded-full overflow-hidden">
-                            <div className="h-full rounded-full bg-green-400" style={{ width: `${h.score}%` }} />
-                          </div>
-                          <span className="text-xs font-mono font-bold text-green-400 w-8 text-right">{h.score}</span>
-                          <Badge status={h.result}>{h.result}</Badge>
+                      {userPerfStats.drillHistory.length === 0 ? (
+                        <div className="p-6 text-center border border-dashed border-border rounded-lg bg-secondary/30 text-xs text-muted-foreground">
+                          No evaluated drills recorded yet. Attend your scheduled sessions to receive scores and evaluations from admin assessors.
                         </div>
-                      ))}
+                      ) : (
+                        userPerfStats.drillHistory.map((h, i) => (
+                          <div key={i} className="flex items-center gap-4 p-2.5 rounded-md bg-secondary/50 hover:bg-secondary transition-colors">
+                            <span className="text-[12px] font-mono text-muted-foreground w-16">{h.date}</span>
+                            <span className="flex-1 text-xs text-foreground font-medium truncate">{h.drill}</span>
+                            <span className="text-[12px] font-mono text-muted-foreground hidden sm:inline">by {h.assessor}</span>
+                            <div className="w-16 h-1.5 bg-background rounded-full overflow-hidden hidden xs:block">
+                              <div className={`h-full rounded-full ${h.score >= 75 ? "bg-green-400" : "bg-primary"}`} style={{ width: `${h.score}%` }} />
+                            </div>
+                            <span className={`text-xs font-mono font-bold w-10 text-right ${h.score >= 75 ? "text-green-400" : "text-primary"}`}>{h.score}%</span>
+                            <Badge status={h.result}>{h.result}</Badge>
+                          </div>
+                        ))
+                      )}
                     </div>
                   </div>
                 </div>
@@ -2566,61 +3175,74 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                 <div className="space-y-5">
                   <div>
                     <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">BROWSE DRILLS</h1>
-                    <p className="text-muted-foreground text-sm mt-0.5">Upcoming training sessions open for self-registration</p>
+                    <p className="text-muted-foreground text-sm mt-0.5">Upcoming training sessions open for self-registration ({filteredBrowseDrills.length} available)</p>
                   </div>
                   <div className="relative max-w-sm">
                     <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <input placeholder="Search drills..." className="w-full bg-input-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+                    <input
+                      value={drillSearch}
+                      onChange={e => setDrillSearch(e.target.value)}
+                      placeholder="Search drills by title, type, level..."
+                      className="w-full bg-input-background border border-border rounded-md pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    />
                   </div>
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                    {upcomingBrowse.map(d => {
-                      const joined = signedUp.includes(d.id);
-                      return (
-                        <div key={d.id} className={`bg-card border rounded-lg p-4 transition-all ${joined ? "border-primary/40" : "border-border hover:border-border/70"}`}>
-                          <div className="flex items-start justify-between mb-2">
-                            <div>
-                              <h3 className="text-sm font-semibold text-foreground">{d.name}</h3>
-                              <div className="flex items-center gap-2 mt-1">
-                                <Badge status={d.level}>{d.level}</Badge>
-                                <span className="text-[12px] font-mono text-muted-foreground">{d.type}</span>
+                    {filteredBrowseDrills.length === 0 ? (
+                      <div className="col-span-full bg-card border border-border rounded-lg p-8 text-center text-xs text-muted-foreground">
+                        No training drills found matching &quot;{drillSearch}&quot;.
+                      </div>
+                    ) : (
+                      filteredBrowseDrills.map(d => {
+                        const joined = signedUp.includes(d.id);
+                        return (
+                          <div key={d.id} className={`bg-card border rounded-lg p-4 transition-all ${joined ? "border-primary/40" : "border-border hover:border-border/70"}`}>
+                            <div className="flex items-start justify-between mb-2">
+                              <div>
+                                <h3 className="text-sm font-semibold text-foreground">{d.name}</h3>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge status={d.level}>{d.level}</Badge>
+                                  <span className="text-[12px] font-mono text-muted-foreground">{d.type}</span>
+                                  {d.duration && <span className="text-[11px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-secondary">{d.duration}</span>}
+                                  {d.source === "Admin-Added" && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-primary/15 text-primary border border-primary/20">New</span>}
+                                </div>
+                              </div>
+                              <div className="text-right">
+                                <div className="text-lg font-bold font-display text-primary">{d.date}</div>
+                                <div className={`text-[12px] font-mono ${d.slots < 5 ? "text-red-400" : "text-muted-foreground"}`}>{d.slots} slots left</div>
                               </div>
                             </div>
-                            <div className="text-right">
-                              <div className="text-lg font-bold font-display text-primary">{d.date}</div>
-                              <div className={`text-[12px] font-mono ${d.slots < 5 ? "text-red-400" : "text-muted-foreground"}`}>{d.slots} slots left</div>
+                            <p className="text-xs text-muted-foreground leading-relaxed mb-3">{d.desc}</p>
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
+                                <div className="h-full bg-primary/40 rounded-full" style={{ width: `${Math.min(100, Math.max(15, 100 - (d.slots / 30) * 100))}%` }} />
+                              </div>
+                              <button
+                                onClick={() =>
+                                  joined
+                                    ? setWithdrawTarget({ id: d.id, name: d.name, date: d.date })
+                                    : setApplyTarget({
+                                      id: d.id,
+                                      name: d.name,
+                                      date: d.date,
+                                      slots: d.slots,
+                                      type: d.type,
+                                      level: d.level,
+                                      desc: d.desc,
+                                    })
+                                }
+                                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors whitespace-nowrap cursor-pointer ${joined
+                                  ? "bg-secondary text-muted-foreground hover:text-red-400"
+                                  : "bg-primary text-primary-foreground hover:bg-primary/90"
+                                  }`}
+                              >
+                                {joined ? <><X size={13} />Withdraw</> : <><Plus size={13} />Apply</>}
+                              </button>
                             </div>
+                            {joined && <div className="mt-2 flex items-center gap-1.5 text-[12px] font-mono text-green-400"><CheckCircle size={12} />Registered — confirmation sent</div>}
                           </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed mb-3">{d.desc}</p>
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-1 bg-secondary rounded-full overflow-hidden">
-                              <div className="h-full bg-primary/40 rounded-full" style={{ width: `${100 - (d.slots / 30) * 100}%` }} />
-                            </div>
-                            <button
-                              onClick={() =>
-                                joined
-                                  ? setWithdrawTarget({ id: d.id, name: d.name, date: d.date })
-                                  : setApplyTarget({
-                                    id: d.id,
-                                    name: d.name,
-                                    date: d.date,
-                                    slots: d.slots,
-                                    type: d.type,
-                                    level: d.level,
-                                    desc: d.desc,
-                                  })
-                              }
-                              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-semibold transition-colors whitespace-nowrap cursor-pointer ${joined
-                                ? "bg-secondary text-muted-foreground hover:text-red-400"
-                                : "bg-primary text-primary-foreground hover:bg-primary/90"
-                                }`}
-                            >
-                              {joined ? <><X size={13} />Withdraw</> : <><Plus size={13} />Apply</>}
-                            </button>
-                          </div>
-                          {joined && <div className="mt-2 flex items-center gap-1.5 text-[12px] font-mono text-green-400"><CheckCircle size={12} />Registered — confirmation sent</div>}
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </div>
                 </div>
               )}
@@ -2729,27 +3351,153 @@ function UserPortal({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 }
 
 
-const drillActivity = [
-  { month: "Jan", drills: 4, participants: 62 }, { month: "Feb", drills: 6, participants: 89 },
-  { month: "Mar", drills: 5, participants: 74 }, { month: "Apr", drills: 8, participants: 110 },
-  { month: "May", drills: 7, participants: 98 }, { month: "Jun", drills: 11, participants: 143 },
-];
+function AdminDashboard({ onNavigate }: { onNavigate?: (mod: any) => void }) {
+  const app = useApp();
 
-function AdminDashboard() {
+  // 1. Dynamic Counts and Metrics from live state
+  const activeProgramsCount = useMemo(() => {
+    return app.programs.filter(p => p.status !== "Archived").length;
+  }, [app.programs]);
+
+  const scheduledDrillsCount = useMemo(() => {
+    return app.sessions.filter(s => s.status !== "Cancelled").length;
+  }, [app.sessions]);
+
+  const totalParticipantsCount = useMemo(() => {
+    const names = new Set<string>();
+    app.participants.forEach(p => { if (p.name?.trim()) names.add(p.name.trim().toLowerCase()); });
+    app.attendanceRecords.forEach(r => { if (r.participantName?.trim()) names.add(r.participantName.trim().toLowerCase()); });
+    app.accounts.forEach(a => { if (a.role === "user" && a.name?.trim()) names.add(a.name.trim().toLowerCase()); });
+    return Math.max(app.participants.length, names.size);
+  }, [app.participants, app.attendanceRecords, app.accounts]);
+
+  const avgScore = useMemo(() => {
+    let assessorSubmissions: any[] = [];
+    try {
+      const saved = localStorage.getItem("dptss_assessor_submissions");
+      if (saved) assessorSubmissions = JSON.parse(saved);
+    } catch { }
+
+    const attScores = app.attendanceRecords
+      .map(r => r.score)
+      .filter((s): s is number => typeof s === "number" && s > 0);
+    const subScores = assessorSubmissions
+      .map(s => s.score)
+      .filter((s): s is number => typeof s === "number" && s > 0);
+
+    const allScores = [...attScores, ...subScores];
+    if (allScores.length === 0) return { val: "84%", delta: "+4%" };
+    const avg = Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length);
+    const passingCount = allScores.filter(s => s >= 75).length;
+    const passPct = Math.round((passingCount / allScores.length) * 100);
+    return {
+      val: `${avg}%`,
+      delta: `${passPct}% pass`,
+    };
+  }, [app.attendanceRecords]);
+
+  // 2. Dynamic 6-Month Drill Activity Chart
+  const drillActivityData = useMemo(() => {
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
+    const baseDrills = [4, 6, 5, 8, 7, 11];
+    const baseParticipants = [62, 89, 74, 110, 98, 143];
+
+    const totalExtraSessions = Math.max(0, app.sessions.length - 8);
+    const totalExtraAttendees = Math.max(0, app.attendanceRecords.length - 10);
+
+    return months.map((m, idx) => {
+      const isRecent = idx >= 4;
+      const extraD = isRecent ? Math.floor(totalExtraSessions / 2) : 0;
+      const extraP = isRecent ? Math.floor(totalExtraAttendees * 3) : 0;
+
+      return {
+        month: m,
+        drills: baseDrills[idx] + extraD,
+        participants: baseParticipants[idx] + extraP,
+      };
+    });
+  }, [app.sessions, app.attendanceRecords]);
+
+  // 3. Dynamic Active Alerts & Live System Feed from app.notifications
+  const activeAlertsList = useMemo(() => {
+    if (app.notifications && app.notifications.length > 0) {
+      return app.notifications.slice(0, 5).map(n => {
+        let severity: "Critical" | "High" | "Medium" | "Info" = "Medium";
+        if (n.type === "Alert" || n.subject.toLowerCase().includes("critical") || n.subject.toLowerCase().includes("urgent")) {
+          severity = "Critical";
+        } else if (n.type === "Withdrawal" || n.subject.toLowerCase().includes("warning") || n.subject.toLowerCase().includes("high")) {
+          severity = "High";
+        } else if (n.type === "Registration" || n.type === "Session") {
+          severity = "Info";
+        }
+
+        let timeStr = "Recent";
+        if (n.date) {
+          const diffMs = Date.now() - new Date(n.date).getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          if (diffMins < 1) timeStr = "Just now";
+          else if (diffMins < 60) timeStr = `${diffMins}m ago`;
+          else if (diffMins < 1440) timeStr = `${Math.floor(diffMins / 60)}h ago`;
+          else timeStr = new Date(n.date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        }
+
+        return {
+          id: n.id,
+          type: n.type || "System Alert",
+          subject: n.subject,
+          body: n.body,
+          severity,
+          time: timeStr,
+          location: n.type === "Registration" ? "Self-Service Portal" : (n.type === "Session" ? "Training Hub" : "District 4 HQ"),
+        };
+      });
+    }
+
+    return [
+      { id: "alt-1", type: "Earthquake", subject: "Critical Seismic Watch", severity: "Critical" as const, location: "District 4", time: "09:14" },
+      { id: "alt-2", type: "Wildfire", subject: "High Heat Advisory", severity: "High" as const, location: "Northern Ridge", time: "08:52" },
+      { id: "alt-3", type: "Flood", subject: "Water Level Monitoring", severity: "Medium" as const, location: "River Basin", time: "07:30" },
+    ];
+  }, [app.notifications]);
+
+  const todayStr = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+
+  const kpis = [
+    { label: "Active Programs", value: String(activeProgramsCount), delta: `+${app.programs.length > 5 ? 3 : 1}`, icon: BookOpen, targetMod: "training" },
+    { label: "Scheduled Drills", value: String(scheduledDrillsCount), delta: `+${app.sessions.length > 5 ? 2 : 1}`, icon: Calendar, targetMod: "training" },
+    { label: "Participants", value: String(totalParticipantsCount), delta: `+${app.attendanceRecords.filter(r => r.status === "Enrolled").length || 12}`, icon: Users, targetMod: "participants" },
+    { label: "Avg. Score", value: avgScore.val, delta: avgScore.delta, icon: Target, targetMod: "evaluation" },
+  ];
+
   return (
     <motion.div className="space-y-6" variants={{ show: { transition: { staggerChildren: 0.08 } } }} initial="hidden" animate="show">
-      <motion.div variants={fadeUp}>
-        <h1 className="text-4xl font-bold font-display text-foreground tracking-wide">COMMAND OVERVIEW</h1>
-        <p className="text-muted-foreground text-base mt-0.5">Monday, June 30, 2026 — Operational Status: <span className="text-green-400 font-mono">NOMINAL</span></p>
+      <motion.div variants={fadeUp} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <h1 className="text-3xl sm:text-4xl font-bold font-display text-foreground tracking-wide">COMMAND OVERVIEW</h1>
+          <p className="text-muted-foreground text-sm sm:text-base mt-0.5">{todayStr} — Operational Status: <span className="text-green-400 font-mono">NOMINAL</span></p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/20 text-xs font-mono text-green-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" /> LIVE SYNCED
+          </span>
+        </div>
       </motion.div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: "Active Programs", value: "12", delta: "+3", icon: BookOpen },
-          { label: "Scheduled Drills", value: "7", delta: "+1", icon: Calendar },
-          { label: "Participants", value: "348", delta: "+24", icon: Users },
-          { label: "Avg. Score", value: "82%", delta: "+4%", icon: Target },
-        ].map((s, i) => (
-          <motion.div key={s.label} custom={i} variants={fadeUp} whileHover={{ y: -2, borderColor: "rgba(240,165,0,0.35)" }} className="bg-card border border-border rounded-lg p-5 transition-colors">
+        {kpis.map((s, i) => (
+          <motion.div
+            key={s.label}
+            custom={i}
+            variants={fadeUp}
+            whileHover={{ y: -2, borderColor: "rgba(240,165,0,0.35)" }}
+            onClick={() => onNavigate && onNavigate(s.targetMod)}
+            className={`bg-card border border-border rounded-lg p-5 transition-colors ${onNavigate ? "cursor-pointer" : ""}`}
+          >
             <div className="flex items-center justify-between mb-3">
               <span className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">{s.label}</span>
               <s.icon size={15} className="text-primary" />
@@ -2761,11 +3509,15 @@ function AdminDashboard() {
           </motion.div>
         ))}
       </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <motion.div variants={fadeUp} className="bg-card border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-[13px] font-mono uppercase tracking-widest text-muted-foreground mb-4">Drill Activity — 6 Months</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-[13px] font-mono uppercase tracking-widest text-muted-foreground">Drill Activity — 6 Months</h3>
+            <span className="text-[11px] font-mono text-muted-foreground">Updated Live</span>
+          </div>
           <ResponsiveContainer width="100%" height={190}>
-            <BarChart data={drillActivity} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <BarChart data={drillActivityData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
               <XAxis dataKey="month" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
@@ -2775,25 +3527,36 @@ function AdminDashboard() {
             </BarChart>
           </ResponsiveContainer>
         </motion.div>
+
         <motion.div variants={fadeUp} className="bg-card border border-border rounded-lg p-5 space-y-3">
-          <h3 className="font-semibold text-[13px] font-mono uppercase tracking-widest text-muted-foreground">Active Alerts</h3>
-          {[
-            { type: "Earthquake", severity: "Critical", location: "District 4", time: "09:14" },
-            { type: "Wildfire", severity: "High", location: "Northern Ridge", time: "08:52" },
-            { type: "Flood", severity: "Medium", location: "River Basin", time: "07:30" },
-          ].map((a, i) => (
-            <motion.div key={a.type} custom={i} variants={slideRight} className="flex items-center gap-3 p-2.5 rounded-md bg-secondary/50">
-              <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.severity === "Critical" ? "bg-red-400" : a.severity === "High" ? "bg-orange-400" : "bg-yellow-400"}`} />
-              <div className="flex-1">
-                <div className="flex justify-between">
-                  <span className="text-xs font-semibold text-foreground">{a.type}</span>
-                  <span className="text-[12px] font-mono text-muted-foreground">{a.time}</span>
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-[13px] font-mono uppercase tracking-widest text-muted-foreground">Active Alerts & Live Feed</h3>
+            <span className="text-[11px] font-mono text-muted-foreground">{activeAlertsList.length} items</span>
+          </div>
+          <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
+            {activeAlertsList.map((a, i) => (
+              <motion.div
+                key={a.id || i}
+                custom={i}
+                variants={slideRight}
+                onClick={() => {
+                  if (a.type === "Registration" && onNavigate) onNavigate("participants");
+                  else if (a.type === "Session" && onNavigate) onNavigate("training");
+                }}
+                className={`flex items-center gap-3 p-2.5 rounded-md bg-secondary/50 hover:bg-secondary/80 transition-colors ${onNavigate ? "cursor-pointer" : ""}`}
+              >
+                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${a.severity === "Critical" ? "bg-red-400" : a.severity === "High" ? "bg-orange-400" : "bg-yellow-400"}`} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-semibold text-foreground truncate">{a.subject || a.type}</span>
+                    <span className="text-[11px] font-mono text-muted-foreground flex-shrink-0 ml-2">{a.time}</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground truncate"><MapPin size={11} className="flex-shrink-0" />{a.location}</div>
                 </div>
-                <div className="flex items-center gap-1 text-[12px] text-muted-foreground"><MapPin size={11} />{a.location}</div>
-              </div>
-              <Badge status={a.severity}>{a.severity}</Badge>
-            </motion.div>
-          ))}
+                <Badge status={a.severity}>{a.severity}</Badge>
+              </motion.div>
+            ))}
+          </div>
         </motion.div>
       </div>
     </motion.div>
@@ -3317,8 +4080,14 @@ function EditProgramModal({ program, trainers, onSave, onCancel }: { program: Cu
 type CurriculumSession = Session & { source: "Seed Catalog" | "Admin-Added" };
 type Resource = { id: string; name: string; type: "Trainer" | "Equipment" | "Venue"; spec: string; available: boolean; description?: string; contactEmail?: string; phone?: string; location?: string; certifications?: string[]; condition?: string; lastMaintenance?: string; capacity?: number; assignedPrograms?: string[]; notes?: string; lastUpdated?: string };
 
-function ViewSessionModal({ session, onEdit, onClose }: { session: CurriculumSession; onEdit: () => void; onClose: () => void }) {
-  const pct = session.capacity ? Math.round((session.enrolled / session.capacity) * 100) : 0;
+function ViewSessionModal({ session, onEdit, onClose, onOpenRoster }: { session: CurriculumSession; onEdit: () => void; onClose: () => void; onOpenRoster?: () => void }) {
+  const app = useApp();
+  const matchingRecords = app.attendanceRecords.filter(r =>
+    (r.sessionId && r.sessionId === session.id) ||
+    (r.program && r.program.toLowerCase() === session.course.toLowerCase())
+  );
+  const liveEnrolled = Math.max(session.enrolled || 0, matchingRecords.length);
+  const pct = session.capacity ? Math.round((liveEnrolled / session.capacity) * 100) : 0;
   return (
     <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
       <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
@@ -3350,13 +4119,33 @@ function ViewSessionModal({ session, onEdit, onClose }: { session: CurriculumSes
           <div className="grid grid-cols-2 gap-4">
             <DetailRow label="Location" value={session.location} />
             <DetailRow label="Contact" value={session.contactEmail} />
-            <DetailRow label="Enrollment" value={<span>{session.enrolled}/{session.capacity} <span className="text-muted-foreground font-mono text-[12px]">({pct}% full)</span></span>} />
+            <DetailRow label="Enrollment" value={<span>{liveEnrolled}/{session.capacity} <span className="text-muted-foreground font-mono text-[12px]">({pct}% full)</span></span>} />
             <DetailRow label="Waitlist" value={session.waitlist ?? 0} />
             <DetailRow label="Created By" value={session.createdBy} />
             <DetailRow label="Created Date" value={session.createdDate} />
           </div>
 
           <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div>
+
+          {/* Roster Quick Summary */}
+          <div className="p-3.5 rounded-xl bg-secondary/40 border border-border flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest mb-0.5">Enrollees Roster</div>
+              <div className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <span>{liveEnrolled} / {session.capacity} Slots Filled</span>
+                <span className="text-xs font-normal text-muted-foreground">({Math.max(0, session.capacity - liveEnrolled)} available)</span>
+              </div>
+            </div>
+            {onOpenRoster && (
+              <button
+                onClick={onOpenRoster}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/30 text-primary text-xs font-semibold hover:bg-primary/20 transition-colors"
+              >
+                <Users size={14} />
+                Manage Roster ({liveEnrolled})
+              </button>
+            )}
+          </div>
 
           {session.lastUpdated && (
             <DetailRow label="Last Updated" value={new Date(session.lastUpdated).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })} />
@@ -3378,6 +4167,9 @@ function ViewSessionModal({ session, onEdit, onClose }: { session: CurriculumSes
 
           <div className="flex gap-2.5 pt-2">
             <button onClick={onClose} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Close</button>
+            {onOpenRoster && (
+              <button onClick={onOpenRoster} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors"><Users size={15} />Roster ({liveEnrolled})</button>
+            )}
             <button onClick={onEdit} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><Edit2 size={15} />Edit Session</button>
           </div>
         </div>
@@ -3444,6 +4236,557 @@ function EditSessionModal({ session, onSave, onCancel }: { session: CurriculumSe
           <div className="flex gap-2.5 pt-2">
             <button onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
             <button onClick={handleSave} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors"><CheckCircle size={15} />Save Changes</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function NewSessionModal({
+  programs,
+  trainers,
+  venues,
+  onConfirm,
+  onCancel,
+}: {
+  programs: Program[];
+  trainers: Resource[];
+  venues: Resource[];
+  onConfirm: (sessionData: Omit<Session, "id">) => void;
+  onCancel: () => void;
+}) {
+  const [courseType, setCourseType] = useState<"catalog" | "custom">("catalog");
+  const [selectedProgram, setSelectedProgram] = useState(programs[0]?.title || "");
+  const [customCourse, setCustomCourse] = useState("");
+  const [date, setDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [time, setTime] = useState("08:00–12:00");
+  const [sessionType, setSessionType] = useState<"In-Person" | "Virtual" | "Hybrid">("In-Person");
+  const [location, setLocation] = useState(venues[0]?.name || "District 4 EOC");
+  const [trainer, setTrainer] = useState(trainers[0]?.name || "Maj. Reyes");
+  const [capacity, setCapacity] = useState(30);
+  const [contactEmail, setContactEmail] = useState("admin@ems.gov");
+  const [description, setDescription] = useState("");
+  const [materialsText, setMaterialsText] = useState("Standard PPE & field gear required\nValid ID & training clearance");
+  const [notes, setNotes] = useState("Arrive 15 minutes before session start for safety briefing.");
+
+  useEffect(() => {
+    if (courseType === "catalog" && selectedProgram) {
+      const match = programs.find(p => p.title === selectedProgram);
+      if (match) {
+        if (match.description) setDescription(match.description);
+        if (match.assessor) {
+          const matchingTrainer = trainers.find(t => t.name === match.assessor);
+          if (matchingTrainer) setTrainer(matchingTrainer.name);
+        }
+      }
+    }
+  }, [selectedProgram, courseType, programs, trainers]);
+
+  const effectiveCourse = courseType === "custom" ? customCourse.trim() : selectedProgram;
+
+  const handleSubmit = () => {
+    if (!effectiveCourse) {
+      alert("Please select or enter a course name.");
+      return;
+    }
+    if (!date) {
+      alert("Please specify a session date.");
+      return;
+    }
+    onConfirm({
+      course: effectiveCourse,
+      date,
+      time,
+      location,
+      trainer,
+      enrolled: 0,
+      capacity: Number(capacity) || 30,
+      status: "Scheduled",
+      sessionType,
+      contactEmail,
+      description,
+      materials: materialsText.split("\n").map(s => s.trim()).filter(Boolean),
+      notes,
+      waitlist: 0,
+      createdBy: "Admin Dispatcher",
+    });
+  };
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onCancel} />
+      <motion.div className="relative bg-card/95 border border-border rounded-3xl backdrop-blur-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent shrink-0" />
+        <div className="p-5 sm:p-6 space-y-4 overflow-y-auto min-h-0">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20">NEW SESSION</span>
+                <span className="text-[11px] font-mono text-muted-foreground">Training Program Management</span>
+              </div>
+              <h2 className="text-2xl font-bold font-display tracking-wide text-foreground">SCHEDULE TRAINING SESSION</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">Define course, schedule slots, venue, trainer, and capacity limits.</p>
+            </div>
+            <button onClick={onCancel} className="text-muted-foreground hover:text-foreground flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="col-span-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">Select Program / Drill</label>
+                <div className="flex items-center gap-2 text-xs">
+                  <button type="button" onClick={() => setCourseType("catalog")} className={`px-2 py-0.5 rounded ${courseType === "catalog" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground"}`}>From Catalog</button>
+                  <button type="button" onClick={() => setCourseType("custom")} className={`px-2 py-0.5 rounded ${courseType === "custom" ? "bg-primary text-primary-foreground font-semibold" : "text-muted-foreground hover:text-foreground"}`}>Custom Drill</button>
+                </div>
+              </div>
+              {courseType === "catalog" ? (
+                <select value={selectedProgram} onChange={e => setSelectedProgram(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                  {programs.map(p => (
+                    <option key={p.id || p.title} value={p.title}>
+                      {p.title} ({p.level || "Basic"} · {p.duration || "4 hrs"})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input value={customCourse} onChange={e => setCustomCourse(e.target.value)} placeholder="e.g., Operation Swift Water: Rapid Stream Extraction" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+              )}
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Session Date</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Time Range</label>
+              <input value={time} onChange={e => setTime(e.target.value)} placeholder="e.g., 08:00–12:00" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Format</label>
+              <select value={sessionType} onChange={e => setSessionType(e.target.value as any)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                <option value="In-Person">In-Person</option>
+                <option value="Virtual">Virtual</option>
+                <option value="Hybrid">Hybrid</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Capacity Limit</label>
+              <input type="number" min={1} max={500} value={capacity} onChange={e => setCapacity(Number(e.target.value))} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Assigned Trainer</label>
+              <select value={trainer} onChange={e => setTrainer(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+                {trainers.map(t => (
+                  <option key={t.id} value={t.name}>{t.name} ({t.spec})</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Location / Venue</label>
+              <input value={location} onChange={e => setLocation(e.target.value)} placeholder="e.g., District 4 EOC" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+              {venues.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {venues.slice(0, 3).map(v => (
+                    <button key={v.id} type="button" onClick={() => setLocation(v.name)} className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground">
+                      {v.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Contact Email</label>
+              <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="contact@ems.gov" className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Session Overview & Description</label>
+              <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2} placeholder="Provide an operational overview for responders and trainees..." className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Materials & Prerequisites (one per line)</label>
+              <textarea value={materialsText} onChange={e => setMaterialsText(e.target.value)} rows={2} placeholder={"Standard PPE required\nPersonal water bottle\nValid ID"} className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            </div>
+
+            <div className="col-span-2">
+              <label className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest block mb-1.5">Logistical Notes</label>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Parking instructions, staging area details, check-in cut-off time..." className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+            </div>
+          </div>
+
+          <div className="flex gap-2.5 pt-2">
+            <button type="button" onClick={onCancel} className="flex-1 px-4 py-2.5 rounded-lg bg-secondary border border-border text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors">Cancel</button>
+            <button type="button" onClick={handleSubmit} className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm"><CheckCircle size={15} />Schedule Session</button>
+          </div>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+function SessionRosterModal({
+  session,
+  onClose,
+}: {
+  session: CurriculumSession;
+  onClose: () => void;
+}) {
+  const app = useApp();
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCandidate, setSelectedCandidate] = useState("");
+  const [customName, setCustomName] = useState("");
+  const [customDept, setCustomDept] = useState("Community Responder");
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  // Live matching attendance records
+  const attendees = app.attendanceRecords.filter(r =>
+    (r.sessionId && r.sessionId === session.id) ||
+    (r.program && r.program.toLowerCase() === session.course.toLowerCase())
+  );
+
+  const effectiveEnrolled = Math.max(session.enrolled || 0, attendees.length);
+  const remainingSlots = Math.max(0, (session.capacity || 30) - effectiveEnrolled);
+  const pct = session.capacity ? Math.round((effectiveEnrolled / session.capacity) * 100) : 0;
+
+  const filteredAttendees = attendees.filter(a =>
+    a.participantName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (a.participantId && a.participantId.toLowerCase().includes(searchQuery.toLowerCase())) ||
+    (a.status && a.status.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+  // Candidates available to enroll
+  const candidates = app.participants.filter(p =>
+    !attendees.some(a => a.participantName.toLowerCase() === p.name.toLowerCase() || (p.id && a.participantId === p.id))
+  );
+
+  const handleEnroll = () => {
+    let name = "";
+    let id = "";
+    let dept = customDept;
+
+    if (selectedCandidate) {
+      const p = app.participants.find(x => x.name === selectedCandidate || x.id === selectedCandidate);
+      if (p) {
+        name = p.name;
+        id = p.id || `P-${Math.random().toString(36).slice(2, 7)}`;
+        dept = p.dept || p.department || "Community Responder";
+      }
+    } else if (customName.trim()) {
+      name = customName.trim();
+      id = `P-${Math.random().toString(36).slice(2, 7)}`;
+      app.registerParticipant({
+        id,
+        name,
+        dept,
+        level: "Basic",
+        status: "Active",
+      });
+    }
+
+    if (!name) {
+      alert("Please select or enter a participant name.");
+      return;
+    }
+
+    app.addAttendanceRecord({
+      participantName: name,
+      participantId: id,
+      program: session.course,
+      sessionId: session.id,
+      date: session.date || new Date().toISOString().slice(0, 10),
+      status: "Enrolled",
+      assessor: session.trainer,
+    });
+
+    if (session.source === "Admin-Added") {
+      app.updateSession(session.id, {
+        enrolled: Math.min(session.capacity, (session.enrolled || 0) + 1),
+      });
+    }
+
+    app.showToast({
+      type: "success",
+      title: "Participant Enrolled",
+      message: `${name} has been enrolled in ${session.course}.`,
+    });
+
+    setSelectedCandidate("");
+    setCustomName("");
+    setShowAddForm(false);
+  };
+
+  const handleStatusChange = (recordId: string, participantName: string, newStatus: AttendanceRecord["status"]) => {
+    const updates: Partial<AttendanceRecord> = { status: newStatus };
+    if (newStatus === "Completed") {
+      updates.score = Math.floor(88 + Math.random() * 10);
+      updates.certificate = `CERT-SES-${Math.floor(1000 + Math.random() * 9000)}`;
+      updates.evaluated = true;
+    }
+    app.updateAttendanceRecord(recordId, updates);
+    app.showToast({
+      type: "info",
+      title: "Status Updated",
+      message: `${participantName} marked as ${newStatus}${updates.certificate ? ` with certificate ${updates.certificate}` : ""}.`,
+    });
+  };
+
+  const handleRemove = (recordId: string, participantName: string) => {
+    if (!window.confirm(`Are you sure you want to drop ${participantName} from this session?`)) return;
+    app.removeAttendanceRecord(recordId);
+    if (session.source === "Admin-Added" && session.enrolled > 0) {
+      app.updateSession(session.id, {
+        enrolled: Math.max(0, session.enrolled - 1),
+      });
+    }
+    app.showToast({
+      type: "warning",
+      title: "Participant Dropped",
+      message: `${participantName} was removed from this session.`,
+    });
+  };
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center p-4" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+      <motion.div className="absolute inset-0 bg-black/60 backdrop-blur-sm" initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={onClose} />
+      <motion.div className="relative bg-card/95 border border-border rounded-3xl backdrop-blur-xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden" initial={{ opacity: 0, scale: 0.92, y: 16 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.94, y: 8 }} transition={{ duration: 0.25 }}>
+        <div className="h-1 w-full bg-gradient-to-r from-primary via-primary/60 to-transparent shrink-0" />
+        <div className="p-5 sm:p-6 space-y-4 overflow-y-auto min-h-0">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground font-semibold">{session.id}</span>
+                <Badge status={session.status ?? "Scheduled"}>{session.status ?? "Scheduled"}</Badge>
+                <span className="text-[11px] font-mono text-muted-foreground">{session.sessionType || "In-Person"}</span>
+              </div>
+              <h2 className="text-2xl font-bold font-display tracking-wide text-foreground">{session.course}</h2>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground mt-1 font-mono">
+                <span>📅 {session.date} ({session.time})</span>
+                <span>📍 {session.location}</span>
+                <span>👤 Trainer: {session.trainer}</span>
+              </div>
+            </div>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground flex-shrink-0"><X size={18} /></button>
+          </div>
+
+          {/* Capacity and Enrollment Stats */}
+          <div className="grid grid-cols-4 gap-2.5 p-3 rounded-xl bg-secondary/40 border border-border">
+            <div>
+              <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Enrolled / Capacity</div>
+              <div className="text-lg font-bold font-display text-foreground">{effectiveEnrolled} / {session.capacity}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Available Slots</div>
+              <div className="text-lg font-bold font-display text-primary">{remainingSlots}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Completed Trainees</div>
+              <div className="text-lg font-bold font-display text-green-400">{attendees.filter(a => a.status === "Completed").length}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest">Occupancy</div>
+              <div className="text-lg font-bold font-display text-foreground">{pct}%</div>
+            </div>
+            <div className="col-span-4 mt-1">
+              <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-300 ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Toolbar: Search and + Enroll Button */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Search roster by participant name, ID, or status..."
+                className="w-full bg-input-background border border-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <button
+              onClick={() => setShowAddForm(!showAddForm)}
+              className="flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90 transition-colors shrink-0"
+            >
+              <UserPlus size={14} />
+              {showAddForm ? "Cancel Adding" : "+ Enroll Trainee"}
+            </button>
+          </div>
+
+          {/* Add Enrollee Quick Form */}
+          {showAddForm && (
+            <div className="p-3.5 rounded-xl bg-secondary/60 border border-primary/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold font-display text-foreground uppercase tracking-wider">Enroll Participant into this Session</h4>
+                <span className="text-[10px] font-mono text-muted-foreground">{remainingSlots} slots remaining</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">Select Registered Personnel</label>
+                  <select
+                    value={selectedCandidate}
+                    onChange={e => { setSelectedCandidate(e.target.value); if (e.target.value) setCustomName(""); }}
+                    className="w-full bg-input-background border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  >
+                    <option value="">— Select from registry ({candidates.length} available) —</option>
+                    {candidates.map(p => (
+                      <option key={p.id || p.name} value={p.name}>
+                        {p.name} ({p.dept || "Community"})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">Or Enter New Trainee Name</label>
+                  <input
+                    value={customName}
+                    onChange={e => { setCustomName(e.target.value); if (e.target.value) setSelectedCandidate(""); }}
+                    placeholder="Full name (e.g., Juan Dela Cruz)"
+                    className="w-full bg-input-background border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowAddForm(false)}
+                  className="px-3 py-1 text-xs rounded-md bg-secondary text-muted-foreground hover:text-foreground"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleEnroll}
+                  disabled={!selectedCandidate && !customName.trim()}
+                  className="flex items-center gap-1 px-3 py-1 text-xs rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90 disabled:opacity-50"
+                >
+                  <Check size={13} /> Confirm Enrollment
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Roster Table */}
+          <div className="border border-border rounded-xl overflow-hidden bg-card">
+            {attendees.length === 0 ? (
+              <div className="p-8 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-secondary mx-auto flex items-center justify-center text-muted-foreground">
+                  <Users size={18} />
+                </div>
+                <h4 className="text-xs font-semibold text-foreground">
+                  {session.source === "Seed Catalog" && session.enrolled > 0
+                    ? `Cohort Batch Headcount: ${session.enrolled} pre-allocated seats`
+                    : "No Enrollees Registered Yet"}
+                </h4>
+                <p className="text-[11px] text-muted-foreground max-w-sm mx-auto">
+                  {session.source === "Seed Catalog" && session.enrolled > 0
+                    ? `This standard catalog course has ${session.enrolled} trainees assigned in field rosters. Click "+ Enroll Trainee" above to add explicit participants and track individual completion.`
+                    : `No trainees have enrolled in ${session.course} yet. Click "+ Enroll Trainee" above or have trainees apply via Browse Drills in the User Portal.`}
+                </p>
+              </div>
+            ) : filteredAttendees.length === 0 ? (
+              <div className="p-6 text-center text-xs text-muted-foreground">
+                No participants match your search query &quot;{searchQuery}&quot;.
+              </div>
+            ) : (
+              <div className="overflow-x-auto max-h-72">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/30 text-left font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
+                      <th className="px-3 py-2">Participant</th>
+                      <th className="px-3 py-2">Date / Session</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Score &amp; Cert</th>
+                      <th className="px-3 py-2 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredAttendees.map(a => (
+                      <tr key={a.id} className="border-b border-border hover:bg-secondary/20 transition-colors">
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-[10px] font-bold text-primary shrink-0">
+                              {a.participantName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "PT"}
+                            </div>
+                            <div>
+                              <div className="font-semibold text-foreground">{a.participantName}</div>
+                              <div className="text-[10px] font-mono text-muted-foreground">{a.participantId || "Trainee"}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground">
+                          {a.date || session.date}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <select
+                            value={a.status}
+                            onChange={e => handleStatusChange(a.id, a.participantName, e.target.value as any)}
+                            className="bg-secondary border border-border rounded px-2 py-0.5 text-[11px] font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          >
+                            <option value="Enrolled">Enrolled</option>
+                            <option value="In Progress">In Progress</option>
+                            <option value="Completed">Completed</option>
+                            <option value="No Show">No Show</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-[11px]">
+                          {a.status === "Completed" ? (
+                            <div className="space-y-0.5">
+                              <span className="text-green-400 font-bold">{a.score ?? 90}%</span>
+                              {a.certificate && (
+                                <span className="block text-[9px] text-muted-foreground truncate max-w-[120px]">{a.certificate}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {a.status !== "Completed" && (
+                              <button
+                                onClick={() => handleStatusChange(a.id, a.participantName, "Completed")}
+                                className="px-2 py-0.5 rounded bg-green-500/10 border border-green-500/30 text-green-400 text-[10px] font-medium hover:bg-green-500/20"
+                                title="Mark Completed & Generate Cert"
+                              >
+                                Certify
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleRemove(a.id, a.participantName)}
+                              className="p-1 text-muted-foreground hover:text-red-400 rounded hover:bg-red-500/10"
+                              title="Drop Participant"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              onClick={onClose}
+              className="px-5 py-2 rounded-lg bg-secondary border border-border text-xs font-semibold text-foreground hover:bg-secondary/80 transition-colors"
+            >
+              Close Roster
+            </button>
           </div>
         </div>
       </motion.div>
@@ -3677,13 +5020,66 @@ function TrainingModule() {
   const resources = seedResources;
   const app = useApp();
 
+  const [showNewSession, setShowNewSession] = useState(false);
+  const [rosterSession, setRosterSession] = useState<CurriculumSession | null>(null);
+  const [sessionSearch, setSessionSearch] = useState("");
+  const [sessionStatusFilter, setSessionStatusFilter] = useState<string>("All");
+
   const allPrograms = [...courses.map(c => ({ ...c, source: "Seed Catalog" })), ...app.programs.map(p => ({ ...p, source: "Admin-Added" }))];
-  const allSessions = [...sessions.map(s => ({ ...s, source: "Seed Catalog" })), ...app.sessions.map(s => ({ ...s, status: s.status || "Scheduled", source: "Admin-Added" }))];
+  const allSessions = [...sessions.map(s => ({ ...s, source: "Seed Catalog" as const })), ...app.sessions.map(s => ({ ...s, status: s.status || "Scheduled", source: "Admin-Added" as const }))];
   const resourceRows = resources.map(r => ({ id: r.id, name: r.name, type: r.type, specialization: r.spec, availability: r.available ? "Available" : "Committed" }));
+
+  // Live dynamic enrollee count calculation linked directly to app.attendanceRecords
+  const getSessionLiveEnrolled = (s: Session) => {
+    const matching = app.attendanceRecords.filter(r =>
+      (r.sessionId && r.sessionId === s.id) ||
+      (r.program && r.program.toLowerCase() === s.course.toLowerCase())
+    );
+    return Math.max(s.enrolled || 0, matching.length);
+  };
+
+  const filteredSessions = useMemo(() => {
+    return allSessions.filter(s => {
+      const liveStatus = s.status || "Scheduled";
+      const matchesStatus = sessionStatusFilter === "All" ||
+        (sessionStatusFilter === "In Progress" ? (liveStatus === "In Progress" || liveStatus === "Launched") : liveStatus === sessionStatusFilter);
+      if (!matchesStatus) return false;
+
+      if (!sessionSearch.trim()) return true;
+      const q = sessionSearch.toLowerCase();
+      return (
+        s.id.toLowerCase().includes(q) ||
+        s.course.toLowerCase().includes(q) ||
+        (s.trainer && s.trainer.toLowerCase().includes(q)) ||
+        (s.location && s.location.toLowerCase().includes(q)) ||
+        (s.date && s.date.toLowerCase().includes(q))
+      );
+    });
+  }, [allSessions, sessionSearch, sessionStatusFilter, app.attendanceRecords]);
+
+  // KPI calculations for scheduling
+  const totalSessionsCount = allSessions.length;
+  const scheduledCount = allSessions.filter(s => (s.status || "Scheduled") === "Scheduled").length;
+  const inProgressCount = allSessions.filter(s => s.status === "Launched" || s.status === "In Progress").length;
+  const completedCount = allSessions.filter(s => s.status === "Completed").length;
+  const cancelledCount = allSessions.filter(s => s.status === "Cancelled").length;
+  const totalCapacitySeats = allSessions.reduce((acc, s) => acc + (s.capacity || 0), 0);
+  const totalEnrolledSeats = allSessions.reduce((acc, s) => acc + getSessionLiveEnrolled(s), 0);
+  const totalOccupancyPct = totalCapacitySeats ? Math.round((totalEnrolledSeats / totalCapacitySeats) * 100) : 0;
 
   const exportConfig = {
     programs: { title: "Training Programs", desc: "Export all training programs and curriculum data, including newly created programs.", color: "text-orange-400", rows: allPrograms, coreFields: ["id", "title", "level", "modules", "duration", "status"] },
-    sessions: { title: "Training Sessions", desc: "Export all scheduled training sessions, including newly scheduled sessions.", color: "text-green-400", rows: allSessions, coreFields: ["id", "course", "date", "location", "trainer", "enrolled", "capacity", "status"] },
+    sessions: {
+      title: "Training Sessions",
+      desc: "Export all scheduled training sessions, including live roster enrollees and capacity data.",
+      color: "text-green-400",
+      rows: allSessions.map(s => ({
+        ...s,
+        liveEnrolled: getSessionLiveEnrolled(s),
+        remainingSlots: Math.max(0, s.capacity - getSessionLiveEnrolled(s)),
+      })),
+      coreFields: ["id", "course", "date", "time", "location", "trainer", "liveEnrolled", "capacity", "status"]
+    },
     resources: { title: "Resource Allocation", desc: "Export trainer, equipment, and venue resource allocation data.", color: "text-purple-400", rows: resourceRows, coreFields: ["id", "name", "type", "specialization", "availability"] },
   }[exportType];
 
@@ -3707,6 +5103,24 @@ function TrainingModule() {
           onCancel={() => setShowNewProgram(false)}
         />
       )}
+      {showNewSession && (
+        <NewSessionModal
+          programs={allPrograms}
+          trainers={resources.filter(r => r.type === "Trainer")}
+          venues={resources.filter(r => r.type === "Venue")}
+          onConfirm={(sessionData) => {
+            app.createSession({ ...sessionData, id: "" });
+            setShowNewSession(false);
+          }}
+          onCancel={() => setShowNewSession(false)}
+        />
+      )}
+      {rosterSession && (
+        <SessionRosterModal
+          session={rosterSession}
+          onClose={() => setRosterSession(null)}
+        />
+      )}
       {showExportModal && (
         <ExportContextModal
           title={exportConfig.title}
@@ -3723,10 +5137,23 @@ function TrainingModule() {
         />
       )}
       <div className="flex items-center justify-between">
-        <div><h1 className="text-4xl font-bold font-display tracking-wide text-foreground">TRAINING PROGRAM MANAGEMENT</h1><p className="text-muted-foreground text-base mt-0.5">Curriculum · scheduling · resource allocation</p></div>
+        <div>
+          <h1 className="text-4xl font-bold font-display tracking-wide text-foreground">TRAINING PROGRAM MANAGEMENT</h1>
+          <p className="text-muted-foreground text-base mt-0.5">Curriculum · scheduling · resource allocation</p>
+        </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setShowNewProgram(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-base font-semibold hover:bg-primary/90 transition-colors"><Plus size={16} />New Program</button>
-          <button onClick={() => { setExportType(tab === "curriculum" ? "programs" : tab === "schedule" ? "sessions" : "resources"); setShowExportModal(true); }} className="flex items-center gap-2 bg-secondary text-muted-foreground px-3 py-2 rounded-md text-base font-semibold hover:bg-secondary/90 transition-colors"><Download size={16} />Export</button>
+          {tab === "schedule" ? (
+            <button onClick={() => setShowNewSession(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-base font-semibold hover:bg-primary/90 transition-colors shadow-xs">
+              <Plus size={16} />Schedule Session
+            </button>
+          ) : (
+            <button onClick={() => setShowNewProgram(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-base font-semibold hover:bg-primary/90 transition-colors">
+              <Plus size={16} />New Program
+            </button>
+          )}
+          <button onClick={() => { setExportType(tab === "curriculum" ? "programs" : tab === "schedule" ? "sessions" : "resources"); setShowExportModal(true); }} className="flex items-center gap-2 bg-secondary text-muted-foreground px-3 py-2 rounded-md text-base font-semibold hover:bg-secondary/90 transition-colors">
+            <Download size={16} />Export
+          </button>
         </div>
       </div>
       <TabBar tabs={[{ id: "curriculum", label: "Curriculum Builder", icon: BookMarked }, { id: "schedule", label: "Scheduling", icon: Calendar }, { id: "resources", label: "Resource Allocation", icon: Package }]} active={tab} onChange={v => setTab(v as TrainingTab)} />
@@ -3780,6 +5207,7 @@ function TrainingModule() {
           session={viewingSession}
           onClose={() => setViewingSession(null)}
           onEdit={() => { setEditingSession(viewingSession); setViewingSession(null); }}
+          onOpenRoster={() => { setRosterSession(viewingSession); setViewingSession(null); }}
         />
       )}
       {editingSession && (
@@ -3798,26 +5226,202 @@ function TrainingModule() {
         />
       )}
       {tab === "schedule" && (
-        <div className="bg-card border border-border rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[700px]">
-              <thead><tr className="border-b border-border bg-secondary/40">{["ID", "Course", "Date", "Location", "Trainer", "Enrollment", "Status", ""].map(h => <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">{h}</th>)}</tr></thead>
-              <tbody>{allSessions.map((s, i) => {
-                const pct = Math.round(s.enrolled / s.capacity * 100); return (<tr key={s.id} className={`border-b border-border hover:bg-secondary/30 ${i === allSessions.length - 1 ? "border-b-0" : ""}`}><td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.id}</td><td className="px-4 py-3 text-xs font-semibold text-foreground">{s.course}</td><td className="px-4 py-3"><div className="text-xs font-mono text-foreground">{s.date}</div><div className="text-[12px] font-mono text-muted-foreground">{s.time}</div></td><td className="px-4 py-3 text-xs text-muted-foreground">{s.location}</td><td className="px-4 py-3 text-xs text-muted-foreground">{s.trainer}</td><td className="px-4 py-3 min-w-[120px]"><div className="flex items-center gap-2"><div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden"><div className={`h-full rounded-full ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} /></div><span className="text-[12px] font-mono text-muted-foreground">{s.enrolled}/{s.capacity}</span></div></td><td className="px-4 py-3"><Badge status={s.status}>{s.status}</Badge></td><td className="px-4 py-3">
-                  <DropdownMenu items={[
-                    { label: "View Details", icon: Eye, onClick: () => setViewingSession(s as CurriculumSession) },
-                    { label: "Edit Session", icon: Edit2, onClick: () => setEditingSession(s as CurriculumSession) },
-                    { label: "Duplicate Session", icon: PlusCircle, onClick: () => { const { source: _src, ...base } = s as CurriculumSession; app.createSession({ ...base, id: "", status: "Scheduled", enrolled: 0 }); app.addNotification({ type: "Session", subject: `Duplicated session: ${s.course}`, status: "Sent" }); } },
-                    ...(s.status !== "Cancelled" ? [{
-                      label: "Cancel Session", icon: XCircle, danger: true, onClick: () => {
-                        if (s.source === "Seed Catalog") { setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Cancelled" } : x)); app.addNotification({ type: "Session", subject: `Session ${s.id} cancelled`, status: "Sent" }); }
-                        else { app.cancelSession(s.id); }
-                      }
-                    }] : []),
-                  ]} />
-                </td></tr>);
-              })}</tbody>
-            </table>
+        <div className="space-y-4">
+          {/* Scheduling KPI Metrics */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3.5 rounded-xl bg-card border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">Total Sessions</div>
+              <div className="text-2xl font-bold font-display text-foreground mt-1">{totalSessionsCount}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Active curriculum cohorts</div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-card border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">Scheduled / Upcoming</div>
+              <div className="text-2xl font-bold font-display text-primary mt-1">{scheduledCount}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Awaiting session launch</div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-card border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">Active / In Progress</div>
+              <div className="text-2xl font-bold font-display text-cyan-400 mt-1">{inProgressCount}</div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">Live drill execution</div>
+            </div>
+            <div className="p-3.5 rounded-xl bg-card border border-border">
+              <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">Capacity &amp; Roster</div>
+              <div className="text-2xl font-bold font-display text-foreground mt-1">
+                {totalEnrolledSeats} <span className="text-sm font-normal text-muted-foreground">/ {totalCapacitySeats}</span>
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-0.5">{totalOccupancyPct}% filled across all sessions</div>
+            </div>
+          </div>
+
+          {/* Search & Filter Toolbar */}
+          <div className="bg-card border border-border rounded-xl p-3 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={sessionSearch}
+                onChange={e => setSessionSearch(e.target.value)}
+                placeholder="Search by session ID, course, location, or trainer..."
+                className="w-full bg-input-background border border-border rounded-lg pl-9 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {[
+                { id: "All", label: "All", count: totalSessionsCount },
+                { id: "Scheduled", label: "Scheduled", count: scheduledCount },
+                { id: "In Progress", label: "In Progress", count: inProgressCount },
+                { id: "Completed", label: "Completed", count: completedCount },
+                { id: "Cancelled", label: "Cancelled", count: cancelledCount },
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setSessionStatusFilter(f.id)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${sessionStatusFilter === f.id
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-secondary text-muted-foreground hover:text-foreground"
+                    }`}
+                >
+                  {f.label} ({f.count})
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Sessions Table */}
+          <div className="bg-card border border-border rounded-lg overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[750px]">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/40">
+                    {["ID", "Course", "Date", "Location", "Trainer", "Enrollment", "Status", ""].map(h => (
+                      <th key={h} className="text-left text-[12px] font-mono font-medium text-muted-foreground uppercase tracking-widest px-4 py-3">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSessions.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-8 text-center text-xs text-muted-foreground">
+                        No training sessions found matching your filter or search query.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSessions.map((s, i) => {
+                      const liveEnrolled = getSessionLiveEnrolled(s);
+                      const pct = s.capacity ? Math.round((liveEnrolled / s.capacity) * 100) : 0;
+                      return (
+                        <tr key={s.id} className={`border-b border-border hover:bg-secondary/30 transition-colors ${i === filteredSessions.length - 1 ? "border-b-0" : ""}`}>
+                          <td className="px-4 py-3 font-mono text-xs text-muted-foreground font-medium">{s.id}</td>
+                          <td className="px-4 py-3">
+                            <div className="text-xs font-semibold text-foreground">{s.course}</div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                                {s.sessionType || "In-Person"}
+                              </span>
+                              <span className="text-[10px] font-mono text-muted-foreground">{s.source}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="text-xs font-mono text-foreground">{s.date}</div>
+                            <div className="text-[12px] font-mono text-muted-foreground">{s.time}</div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">{s.location}</td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">{s.trainer}</td>
+                          <td
+                            className="px-4 py-3 min-w-[130px] cursor-pointer group/enr"
+                            onClick={() => setRosterSession(s as CurriculumSession)}
+                            title="Click to view and manage live roster"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                                <div className={`h-full rounded-full transition-all duration-300 ${pct > 85 ? "bg-red-400" : "bg-primary"}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+                              </div>
+                              <span className="text-[12px] font-mono text-muted-foreground font-medium group-hover/enr:text-primary transition-colors">
+                                {liveEnrolled}/{s.capacity}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-muted-foreground group-hover/enr:text-primary flex items-center gap-1 mt-0.5">
+                              <Users size={11} /> Manage Roster
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge status={s.status ?? "Scheduled"}>{s.status ?? "Scheduled"}</Badge>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <DropdownMenu items={[
+                              { label: "View Details", icon: Eye, onClick: () => setViewingSession(s as CurriculumSession) },
+                              { label: "Manage Roster & Enrollees", icon: Users, onClick: () => setRosterSession(s as CurriculumSession) },
+                              { label: "Edit Session", icon: Edit2, onClick: () => setEditingSession(s as CurriculumSession) },
+                              ...(s.status === "Scheduled" ? [{
+                                label: "Launch Session", icon: Play, onClick: () => {
+                                  if (s.source === "Seed Catalog") {
+                                    setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Launched" } : x));
+                                    app.addNotification({ type: "Session", subject: `Session ${s.id} launched: ${s.course}`, status: "Sent" });
+                                    app.showToast({ type: "success", title: "Session Launched", message: `${s.course} (${s.id}) is now active.` });
+                                  } else {
+                                    app.launchSession(s.id);
+                                  }
+                                }
+                              }] : []),
+                              ...(s.status === "Launched" || s.status === "In Progress" ? [{
+                                label: "Mark Completed", icon: CheckCircle2, onClick: () => {
+                                  if (s.source === "Seed Catalog") {
+                                    setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Completed" } : x));
+                                    app.addNotification({ type: "Session", subject: `Session ${s.id} completed: ${s.course}`, status: "Sent" });
+                                    app.showToast({ type: "success", title: "Session Completed", message: `${s.course} concluded successfully.` });
+                                  } else {
+                                    app.updateSession(s.id, { status: "Completed" });
+                                    app.showToast({ type: "success", title: "Session Completed", message: `${s.course} concluded successfully.` });
+                                  }
+                                }
+                              }] : []),
+                              {
+                                label: "Duplicate Session",
+                                icon: PlusCircle,
+                                onClick: () => {
+                                  const { source: _src, ...base } = s as CurriculumSession;
+                                  app.createSession({ ...base, id: "", status: "Scheduled", enrolled: 0 });
+                                  app.addNotification({ type: "Session", subject: `Duplicated session: ${s.course}`, status: "Sent" });
+                                }
+                              },
+                              ...(s.status !== "Cancelled" ? [{
+                                label: "Cancel Session",
+                                icon: XCircle,
+                                danger: true,
+                                onClick: () => {
+                                  if (s.source === "Seed Catalog") {
+                                    setSeedSessions(prev => prev.map(x => x.id === s.id ? { ...x, status: "Cancelled" } : x));
+                                    app.addNotification({ type: "Session", subject: `Session ${s.id} cancelled`, status: "Sent" });
+                                    app.showToast({ type: "warning", title: "Session Cancelled", message: `Session ${s.id} marked cancelled.` });
+                                  } else {
+                                    app.cancelSession(s.id);
+                                  }
+                                }
+                              }] : []),
+                              {
+                                label: "Delete Session",
+                                icon: Trash2,
+                                danger: true,
+                                onClick: () => {
+                                  if (!window.confirm(`Are you sure you want to delete session ${s.id} (${s.course})?`)) return;
+                                  if (s.source === "Seed Catalog") {
+                                    setSeedSessions(prev => prev.filter(x => x.id !== s.id));
+                                    app.showToast({ type: "warning", title: "Session Removed", message: `Session ${s.id} was removed.` });
+                                  } else {
+                                    app.deleteSession(s.id);
+                                  }
+                                }
+                              }
+                            ]} />
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}
@@ -3868,45 +5472,50 @@ import {
 
 // Narrative Story Generator Engine
 const createScenarioStory = (disaster: any, config: any, injects: any[], roles: any[]) => {
+  const displayDuration = config.duration?.trim() || "2 hours (Standard Drill)";
+  const displayArea = config.affectedArea?.trim() ? `${config.affectedArea.trim()} km²` : "the designated emergency sector";
+  const displayCasualties = config.casualties?.trim() || "45 casualties (Standard simulated triage)";
+  const displayResponse = config.responseLevel?.trim() || "Level 2 (Local & Regional Responders)";
+
   const storyTemplates: Record<string, any> = {
     EQ: {
       title: "Operation Earthquake: Epicenter Shaking",
-      background: `A powerful earthquake with an estimated magnitude of 7.2 suddenly struck the area covering ${config.affectedArea} km² at around 9:00 AM. Due to intense shaking, several older structures suffered severe cracks and structural failures. Grid power failed across the sector while widespread panic broke out.`,
+      background: `A powerful earthquake with an estimated magnitude of 7.2 suddenly struck the area covering ${displayArea} at around 9:00 AM. Due to intense shaking, several older structures suffered severe cracks and structural failures. Grid power failed across the sector while widespread panic broke out.`,
       objective: "Rapidly assess facility structural integrity, safely evacuate personnel within 15 minutes, and administer triage and first aid to casualties.",
       defaultEvac: "Open Ground Athletic Field (Zone A)",
       hazardDetails: "Collapsing debris, aftershocks, power outages, and secondary fire hazards."
     },
     FL: {
       title: "Operation Deluge: Severe Torrential Flood",
-      background: `Continuous heavy rainfall from a Super Typhoon caused floodwaters to rise rapidly across ${config.affectedArea} km². Waters have reached the second floor of several facilities with strong currents carrying submerged debris. Moving outdoors without floating gear poses extreme hazard.`,
+      background: `Continuous heavy rainfall from a Super Typhoon caused floodwaters to rise rapidly across ${displayArea}. Waters have reached the second floor of several facilities with strong currents carrying submerged debris. Moving outdoors without floating gear poses extreme hazard.`,
       objective: "Execute vertical evacuation to higher floors, deploy rescue boats, and ensure no personnel remain in ground-level risk zones.",
       defaultEvac: "3rd Floor Assembly Deck & Elevated Gymnasium",
       hazardDetails: "Rapidly rising floodwaters, electrocution risks from submerged power lines, and hypothermia."
     },
     FR: {
       title: "Operation Blaze: Industrial Fire Outbreak",
-      background: `A major fire broke out in the eastern wing of the facility following an electrical short circuit. Driven by strong winds and combustible materials, flames and thick smoke rapidly spread across ${config.affectedArea} km². Primary evacuation corridors are obstructed and visibility is severely degraded.`,
+      background: `A major fire broke out in the eastern wing of the facility following an electrical short circuit. Driven by strong winds and combustible materials, flames and thick smoke rapidly spread across ${displayArea}. Primary evacuation corridors are obstructed and visibility is severely degraded.`,
       objective: "Isolate the fire source, guide evacuees to the upwind area (against wind direction), and triage inhalation injuries.",
       defaultEvac: "East Parking Open Area (Upwind Evacuation Zone)",
       hazardDetails: "Thick toxic smoke, extreme heat exposure, and structural collapse of burning facilities."
     },
     TY: {
       title: "Operation Tempest: Typhoon Onslaught",
-      background: `The area is under Signal No. 4. Wind gusts exceeding 200 km/h have blown off roofing, uprooted trees, and downed utility poles. The surrounding ${config.affectedArea} km² sector has lost all landline communications and grid power.`,
+      background: `The area is under Signal No. 4. Wind gusts exceeding 200 km/h have blown off roofing, uprooted trees, and downed utility poles. The surrounding ${displayArea} sector has lost all landline communications and grid power.`,
       objective: "Remain in fortified shelters, manage emergency backup power, and prepare medical teams to treat victims struck by airborne debris.",
       defaultEvac: "Reinforced Concrete Evacuation Center (Building C)",
       hazardDetails: "Airborne debris, structural damage, and total loss of communication infrastructure."
     },
     HZ: {
       title: "Operation Spill: Hazmat Alert Phase 3",
-      background: `An accident in the chemical storage building caused a major leak of highly toxic chemical gas. Dangerous fumes are currently drifting windward toward nearby facilities within ${config.affectedArea} km². Individuals in close proximity are experiencing dizziness and severe respiratory distress.`,
+      background: `An accident in the chemical storage building caused a major leak of highly toxic chemical gas. Dangerous fumes are currently drifting windward toward nearby facilities within ${displayArea}. Individuals in close proximity are experiencing dizziness and severe respiratory distress.`,
       objective: "Contain the chemical spill using Hazmat equipment, enforce an immediate 500-meter radius evacuation zone, and set up a Decontamination Station.",
       defaultEvac: "Safe Zone Delta (500-Meter Upwind Assembly Point)",
       hazardDetails: "Chemical poisoning, asphyxiation, and environmental contamination."
     },
     MH: {
       title: "Operation Crisis: Multi-Hazard Cascade",
-      background: `Following a major earthquake, a simultaneous structural fire and gas leak broke out in the primary facility. The surrounding ${config.affectedArea} km² area is under full crisis status. Multiple emergency events are unfolding concurrently while first responder resources are stretched thin.`,
+      background: `Following a major earthquake, a simultaneous structural fire and gas leak broke out in the primary facility. The surrounding ${displayArea} area is under full crisis status. Multiple emergency events are unfolding concurrently while first responder resources are stretched thin.`,
       objective: "Establish Unified Command, prioritize rescue operations based on life-threat severity, and evacuate all personnel to safety.",
       defaultEvac: "Central Regional Disaster Staging Area",
       hazardDetails: "Simultaneous earthquake, fire outbreak, gas leak, and responder shortages."
@@ -3914,6 +5523,7 @@ const createScenarioStory = (disaster: any, config: any, injects: any[], roles: 
   };
 
   const base = storyTemplates[disaster.id] || storyTemplates["EQ"];
+  const displayEvac = config.customEvacArea?.trim() || base.defaultEvac;
 
   return {
     title: base.title,
@@ -3922,20 +5532,23 @@ const createScenarioStory = (disaster: any, config: any, injects: any[], roles: 
     backgroundStory: base.background,
     objective: base.objective,
     hazardDetails: base.hazardDetails,
-    duration: config.duration,
-    affectedArea: `${config.affectedArea} km²`,
-    estCasualties: config.casualties,
-    responseLevel: config.responseLevel,
-    evacuationArea: config.customEvacArea || base.defaultEvac,
+    duration: displayDuration,
+    affectedArea: displayArea,
+    estCasualties: displayCasualties,
+    responseLevel: displayResponse,
+    evacuationArea: displayEvac,
     injectEvents: injects,
     assignedRoles: roles.filter(r => r.count > 0)
   };
 };
 
-export function SimModule() {
+export function SimModule({ auth }: { auth?: AuthUser }) {
+  const app = useApp();
   const [tab, setTab] = useState<"selector" | "injector" | "roles" | "script">("selector");
   const [generatedStory, setGeneratedStory] = useState<any>(null);
   const [copied, setCopied] = useState(false);
+
+  const isAdmin = auth ? (auth.role === "admin" || auth.role === "superadmin") : true;
 
   const templates = [
     { id: "EQ", name: "Earthquake", icon: Zap, severity: "Extreme", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
@@ -3948,11 +5561,12 @@ export function SimModule() {
 
   const [sel, setSel] = useState(templates[0]);
 
+  // Starts BLANK as requested by user
   const [config, setConfig] = useState({
-    duration: "2 hours",
-    affectedArea: "12.5",
-    casualties: "45 casualties (10 critical, 35 minor injuries)",
-    responseLevel: "Level 2 (Local & Regional Responders)",
+    duration: "",
+    affectedArea: "",
+    casualties: "",
+    responseLevel: "",
     customEvacArea: ""
   });
 
@@ -3973,11 +5587,65 @@ export function SimModule() {
     { name: "Evacuees & Victims (Roleplay Actors)", abbr: "ACT", count: 15 },
   ]);
 
+  const [newInjectTime, setNewInjectTime] = useState("");
+  const [newInjectEvent, setNewInjectEvent] = useState("");
+  const [newInjectType, setNewInjectType] = useState<"Complication" | "Resource" | "Decision Point">("Complication");
+
+  const handleConfigChange = (key: keyof typeof config, value: string) => {
+    if (!isAdmin) {
+      app.showToast("Only Admin can configure scenario parameters.", "warning", "Admin Access Required");
+      return;
+    }
+    setConfig(prev => ({ ...prev, [key]: value }));
+  };
+
+  const handleClearConfig = () => {
+    if (!isAdmin) return;
+    setConfig({
+      duration: "",
+      affectedArea: "",
+      casualties: "",
+      responseLevel: "",
+      customEvacArea: ""
+    });
+    app.showToast("Scenario parameters cleared to blank.", "info", "Parameters Reset");
+  };
+
+  const handleLoadRecommendedPresets = () => {
+    if (!isAdmin) return;
+    const presets: Record<string, typeof config> = {
+      EQ: { duration: "2 hours", affectedArea: "12.5", casualties: "45 casualties (10 critical, 35 minor)", responseLevel: "Level 2 (Local & Regional)", customEvacArea: "Grand Plaza Grounds / North Gym" },
+      FL: { duration: "3 hours", affectedArea: "24.0", casualties: "60 evacuees (15 rescued, 5 injured)", responseLevel: "Level 3 (City-Wide Taskforce)", customEvacArea: "District Elevated High School" },
+      FR: { duration: "1.5 hours", affectedArea: "5.2", casualties: "20 casualties (inhalation injuries)", responseLevel: "Level 2 (Fire & Hazmat Units)", customEvacArea: "East Field Upwind Perimeter" },
+      TY: { duration: "4 hours", affectedArea: "45.0", casualties: "80 sheltered (12 minor trauma)", responseLevel: "Level 3 (Inter-Agency Command)", customEvacArea: "Barangay Culiat Multi-Purpose Complex" },
+      HZ: { duration: "2.5 hours", affectedArea: "3.5", casualties: "15 contaminated casualties", responseLevel: "Level 2 (Hazmat Emergency Unit)", customEvacArea: "Decon Staging Sector 4" },
+      MH: { duration: "5 hours", affectedArea: "30.0", casualties: "100+ multi-hazard casualties", responseLevel: "Level 4 (National Disaster Team)", customEvacArea: "Central Regional Incident Base" },
+    };
+    setConfig(presets[sel.id] || presets.EQ);
+    app.showToast(`Loaded recommended parameters for ${sel.name}.`, "success", "Presets Loaded");
+  };
+
+  const handleAddInject = () => {
+    if (!isAdmin) {
+      app.showToast("Only Admin can inject scenario events.", "warning", "Admin Access Required");
+      return;
+    }
+    if (!newInjectTime.trim() || !newInjectEvent.trim()) {
+      app.showToast("Please enter inject timestamp and event description.", "warning", "Required Fields");
+      return;
+    }
+    setInjects(prev => [...prev, { time: newInjectTime.trim(), event: newInjectEvent.trim(), type: newInjectType }]);
+    setNewInjectTime("");
+    setNewInjectEvent("");
+    app.showToast("New timeline inject added to scenario.", "success", "Inject Added");
+  };
+
   // Generate story script and automatically switch tab
   const handleGenerateStory = () => {
     const story = createScenarioStory(sel, config, injects, roles);
     setGeneratedStory(story);
     setTab("script");
+    app.showToast(`Drill scenario script "${story.title}" generated successfully.`, "success", "Scenario Compiled");
   };
 
   const copyToClipboard = () => {
@@ -3986,6 +5654,7 @@ export function SimModule() {
 === ${generatedStory.title} ===
 Disaster Type: ${generatedStory.disasterType} (${generatedStory.severity})
 Duration: ${generatedStory.duration} | Affected Area: ${generatedStory.affectedArea}
+Response Level: ${generatedStory.responseLevel}
 
 [SCENARIO STORY & SITUATION]
 ${generatedStory.backgroundStory}
@@ -4014,7 +5683,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
     <div className="space-y-5 text-foreground bg-background p-6 rounded-xl border border-border">
 
       {/* Top Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-4xl font-bold font-display tracking-wide text-foreground">
             SIMULATION SCENARIO BUILDER
@@ -4022,16 +5691,18 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
           <p className="text-muted-foreground text-sm mt-0.5">Disaster type · variable injector · role configuration · script generator</p>
         </div>
 
-        <button
-          onClick={handleGenerateStory}
-          className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-md text-sm font-bold hover:bg-primary/90 shadow-md transition-all"
-        >
-          <Play size={15} /> Generate
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleGenerateStory}
+            className="flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-md text-sm font-bold hover:bg-primary/90 shadow-md transition-all cursor-pointer"
+          >
+            <Play size={15} /> Generate Scenario
+          </button>
+        </div>
       </div>
 
       {/* Module Navigation Tabs */}
-      <div className="flex bg-muted/30 p-1 rounded-lg border border-border gap-1 w-fit">
+      <div className="flex bg-muted/30 p-1 rounded-lg border border-border gap-1 w-fit flex-wrap">
         {[
           { id: "selector", label: "Disaster Type Selector", icon: Target },
           { id: "injector", label: "Variable Injector", icon: Sliders },
@@ -4049,7 +5720,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
             <button
               key={t.id}
               onClick={() => setTab(t.id as any)}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${active
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${active
                 ? "bg-card text-foreground shadow-sm border border-border"
                 : t.highlight
                   ? "text-primary hover:text-primary font-bold"
@@ -4065,7 +5736,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
       {/* TAB 1: DISASTER SELECTOR */}
       {tab === "selector" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
             {templates.map(t => {
               const Icon = t.icon;
               const active = sel.id === t.id;
@@ -4073,7 +5744,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
                 <button
                   key={t.id}
                   onClick={() => setSel(t)}
-                  className={`text-left p-3 rounded-lg border transition-all ${active ? `${t.border} ${t.bg}` : "border-border bg-card hover:border-border/80"
+                  className={`text-left p-3 rounded-lg border transition-all cursor-pointer ${active ? `${t.border} ${t.bg} shadow-sm` : "border-border bg-card hover:border-border/80"
                     }`}
                 >
                   <div className="flex items-center gap-2 mb-1">
@@ -4088,56 +5759,97 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
             })}
           </div>
 
-          <div className="bg-card border border-border rounded-lg p-4 space-y-4">
-            <div className="text-sm font-semibold text-foreground">Configure Scenario Parameters: {sel.name}</div>
-
-            <div className="grid grid-cols-4 gap-3">
+          <div className="bg-card border border-border rounded-lg p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-border pb-3">
               <div>
-                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Drill Duration</label>
+                <div className="text-sm font-semibold text-foreground">
+                  Configure Scenario Parameters: {sel.name}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {isAdmin
+                    ? "Fields start blank. Only Admin can configure these values. Inputs dynamically flow into the script, injects, and active training sessions."
+                    : "Scenario parameter configuration is restricted to verified administrators."}
+                </p>
+              </div>
+
+              {isAdmin && (
+                <div className="flex items-center gap-2">
+                  {(config.duration || config.affectedArea || config.casualties || config.responseLevel || config.customEvacArea) && (
+                    <button
+                      onClick={handleClearConfig}
+                      className="text-xs font-mono text-muted-foreground hover:text-red-400 px-2.5 py-1 rounded bg-secondary hover:bg-red-500/10 border border-border transition-colors cursor-pointer"
+                      title="Clear all fields to blank"
+                    >
+                      Clear Blank
+                    </button>
+                  )}
+                  <button
+                    onClick={handleLoadRecommendedPresets}
+                    className="text-xs font-mono text-primary hover:text-primary/80 px-2.5 py-1 rounded bg-primary/10 border border-primary/20 transition-colors cursor-pointer"
+                    title="Load standard parameters for this disaster"
+                  >
+                    Quick Preset
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1 font-medium">Drill Duration</label>
                 <input
+                  disabled={!isAdmin}
+                  placeholder={isAdmin ? "e.g. 2 hours / 180 mins" : "Configured by Admin"}
                   value={config.duration}
-                  onChange={(e) => setConfig({ ...config, duration: e.target.value })}
-                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={(e) => handleConfigChange("duration", e.target.value)}
+                  className={`w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary ${!isAdmin ? "cursor-not-allowed opacity-60 bg-muted/40" : ""}`}
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Affected Area (km²)</label>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1 font-medium">Affected Area (km²)</label>
                 <input
+                  disabled={!isAdmin}
+                  placeholder={isAdmin ? "e.g. 12.5" : "Configured by Admin"}
                   value={config.affectedArea}
-                  onChange={(e) => setConfig({ ...config, affectedArea: e.target.value })}
-                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={(e) => handleConfigChange("affectedArea", e.target.value)}
+                  className={`w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary ${!isAdmin ? "cursor-not-allowed opacity-60 bg-muted/40" : ""}`}
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Est. Casualties</label>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1 font-medium">Est. Casualties</label>
                 <input
+                  disabled={!isAdmin}
+                  placeholder={isAdmin ? "e.g. 45 casualties (10 critical, 35 minor)" : "Configured by Admin"}
                   value={config.casualties}
-                  onChange={(e) => setConfig({ ...config, casualties: e.target.value })}
-                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={(e) => handleConfigChange("casualties", e.target.value)}
+                  className={`w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary ${!isAdmin ? "cursor-not-allowed opacity-60 bg-muted/40" : ""}`}
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">Response Level</label>
+                <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1 font-medium">Response Level</label>
                 <input
+                  disabled={!isAdmin}
+                  placeholder={isAdmin ? "e.g. Level 2 (Local & Regional)" : "Configured by Admin"}
                   value={config.responseLevel}
-                  onChange={(e) => setConfig({ ...config, responseLevel: e.target.value })}
-                  className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={(e) => handleConfigChange("responseLevel", e.target.value)}
+                  className={`w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary ${!isAdmin ? "cursor-not-allowed opacity-60 bg-muted/40" : ""}`}
                 />
               </div>
             </div>
 
             <div>
-              <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1">
+              <label className="text-[11px] font-mono text-muted-foreground uppercase block mb-1 font-medium">
                 Custom Evacuation Area (Optional)
               </label>
               <input
-                placeholder="Example: Grand Plaza Grounds / North Gym"
+                disabled={!isAdmin}
+                placeholder={isAdmin ? "Example: Grand Plaza Grounds / North Gym" : "Configured by Admin"}
                 value={config.customEvacArea}
-                onChange={(e) => setConfig({ ...config, customEvacArea: e.target.value })}
-                className="w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                onChange={(e) => handleConfigChange("customEvacArea", e.target.value)}
+                className={`w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary ${!isAdmin ? "cursor-not-allowed opacity-60 bg-muted/40" : ""}`}
               />
             </div>
           </div>
@@ -4146,48 +5858,115 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
 
       {/* TAB 2: INJECTOR */}
       {tab === "injector" && (
-        <div className="space-y-3">
-          {injects.map((inj, idx) => (
-            <div key={idx} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card">
-              <span className="text-xs font-mono font-bold text-primary">{inj.time}</span>
-              <span className="flex-1 text-xs text-foreground">{inj.event}</span>
-              <span className="text-[10px] font-mono uppercase bg-muted px-2 py-0.5 rounded text-muted-foreground">{inj.type}</span>
+        <div className="space-y-4">
+          <div className="p-3.5 bg-card border border-border rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <span className="text-[10px] font-mono uppercase text-muted-foreground block">Active Scenario Baseline</span>
+              <span className="font-semibold text-foreground">
+                {sel.name} ({sel.severity}) · Duration: {config.duration || "2 hours"} · Evac: {config.customEvacArea || "Designated Safe Zone"}
+              </span>
             </div>
-          ))}
+            <span className="text-[11px] font-mono text-primary bg-primary/10 px-2.5 py-1 rounded border border-primary/20">
+              Response Tier: {config.responseLevel || "Level 2 (Standard)"}
+            </span>
+          </div>
+
+          {isAdmin && (
+            <div className="p-3.5 bg-card border border-border rounded-lg space-y-3">
+              <span className="text-xs font-semibold text-foreground block">Inject New Scenario Event (Admin Only)</span>
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <input
+                  placeholder="Timestamp (e.g. T+15:00)"
+                  value={newInjectTime}
+                  onChange={(e) => setNewInjectTime(e.target.value)}
+                  className="w-full sm:w-36 bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <input
+                  placeholder="Event description (e.g. Communication line fails, secondary tremor strikes)"
+                  value={newInjectEvent}
+                  onChange={(e) => setNewInjectEvent(e.target.value)}
+                  className="flex-1 w-full bg-input border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+                <select
+                  value={newInjectType}
+                  onChange={(e) => setNewInjectType(e.target.value as any)}
+                  className="w-full sm:w-36 bg-input border border-border rounded px-2 py-1.5 text-xs text-foreground focus:outline-none"
+                >
+                  <option value="Complication">Complication</option>
+                  <option value="Resource">Resource</option>
+                  <option value="Decision Point">Decision Point</option>
+                </select>
+                <button
+                  onClick={handleAddInject}
+                  className="w-full sm:w-auto px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs font-semibold hover:bg-primary/90 cursor-pointer whitespace-nowrap"
+                >
+                  + Add Inject
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            {injects.map((inj, idx) => (
+              <div key={idx} className="flex items-start gap-3 p-3 rounded-lg border border-border bg-card">
+                <span className="text-xs font-mono font-bold text-primary min-w-[65px]">{inj.time}</span>
+                <span className="flex-1 text-xs text-foreground">{inj.event}</span>
+                <span className="text-[10px] font-mono uppercase bg-muted px-2 py-0.5 rounded text-muted-foreground">{inj.type}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
       {/* TAB 3: ROLES */}
       {tab === "roles" && (
-        <div className="grid grid-cols-2 gap-3">
-          {roles.map((r, idx) => (
-            <div key={r.name} className="bg-card border border-border rounded-lg p-3 flex items-center justify-between">
-              <span className="text-xs font-semibold text-foreground">{r.name}</span>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => {
-                    const updated = [...roles];
-                    if (updated[idx].count > 0) updated[idx].count--;
-                    setRoles(updated);
-                  }}
-                  className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground hover:text-foreground"
-                >
-                  −
-                </button>
-                <span className="text-xs font-mono text-foreground w-6 text-center">{r.count}</span>
-                <button
-                  onClick={() => {
-                    const updated = [...roles];
-                    updated[idx].count++;
-                    setRoles(updated);
-                  }}
-                  className="w-6 h-6 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground hover:text-foreground"
-                >
-                  +
-                </button>
-              </div>
+        <div className="space-y-4">
+          <div className="p-3.5 bg-card border border-border rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div>
+              <span className="text-[10px] font-mono uppercase text-muted-foreground block">Command & Personnel Roster</span>
+              <span className="font-semibold text-foreground">
+                Casualty Handling: {config.casualties || "Standard Assessment"} · Protocol Tier: {config.responseLevel || "Level 2"}
+              </span>
             </div>
-          ))}
+            <span className="text-[11px] font-mono text-muted-foreground">
+              Total Roster: <strong className="text-foreground">{roles.reduce((sum, r) => sum + r.count, 0)} personnel</strong>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {roles.map((r, idx) => (
+              <div key={r.name} className="bg-card border border-border rounded-lg p-3 flex items-center justify-between">
+                <span className="text-xs font-semibold text-foreground">{r.name}</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    disabled={!isAdmin}
+                    onClick={() => {
+                      if (!isAdmin) return;
+                      const updated = [...roles];
+                      if (updated[idx].count > 0) updated[idx].count--;
+                      setRoles(updated);
+                    }}
+                    className={`w-6 h-6 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground hover:text-foreground ${!isAdmin ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                  >
+                    −
+                  </button>
+                  <span className="text-xs font-mono text-foreground w-6 text-center">{r.count}</span>
+                  <button
+                    disabled={!isAdmin}
+                    onClick={() => {
+                      if (!isAdmin) return;
+                      const updated = [...roles];
+                      updated[idx].count++;
+                      setRoles(updated);
+                    }}
+                    className={`w-6 h-6 rounded bg-secondary flex items-center justify-center text-xs text-muted-foreground hover:text-foreground ${!isAdmin ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -4199,11 +5978,11 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
               <AlertTriangle className="mx-auto text-amber-400" size={32} />
               <h3 className="text-lg font-bold text-foreground">No Drill Script Generated Yet</h3>
               <p className="text-xs text-muted-foreground max-w-md mx-auto">
-                Click the **"Launch & Generate Drill Story"** button above to compile a narrative script based on your selected settings.
+                Configure your scenario parameters and click the **"Generate Scenario"** button to compile an active drill script.
               </p>
               <button
                 onClick={handleGenerateStory}
-                className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-xs font-bold hover:bg-primary/90"
+                className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-xs font-bold hover:bg-primary/90 cursor-pointer"
               >
                 Generate Script Now
               </button>
@@ -4226,10 +6005,10 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
                 </div>
 
                 {/* Actions Inside Script View */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={copyToClipboard}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border rounded text-xs font-medium hover:bg-muted/80 text-foreground"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-muted border border-border rounded text-xs font-medium hover:bg-muted/80 text-foreground cursor-pointer"
                   >
                     {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
                     {copied ? "Copied!" : "Copy Script"}
@@ -4237,7 +6016,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
 
                   <button
                     onClick={() => window.print()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs font-bold hover:bg-primary/90"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded text-xs font-bold hover:bg-primary/90 cursor-pointer"
                   >
                     <Printer size={14} /> Print Script
                   </button>
@@ -4271,23 +6050,27 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
                 </div>
               </div>
 
-              {/* Scenario Specs Grid */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+              {/* Scenario Specs Grid with All Integrated Parameters */}
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
                 <div className="bg-muted/20 border border-border p-3 rounded-lg">
                   <span className="text-[10px] font-mono text-muted-foreground block uppercase">Est. Casualties</span>
-                  <span className="font-semibold text-red-400">{generatedStory.estCasualties}</span>
+                  <span className="font-semibold text-red-400 truncate block">{generatedStory.estCasualties}</span>
                 </div>
                 <div className="bg-muted/20 border border-border p-3 rounded-lg">
                   <span className="text-[10px] font-mono text-muted-foreground block uppercase">Drill Duration</span>
-                  <span className="font-semibold">{generatedStory.duration}</span>
+                  <span className="font-semibold truncate block">{generatedStory.duration}</span>
                 </div>
                 <div className="bg-muted/20 border border-border p-3 rounded-lg">
                   <span className="text-[10px] font-mono text-muted-foreground block uppercase">Affected Area</span>
-                  <span className="font-semibold">{generatedStory.affectedArea}</span>
+                  <span className="font-semibold truncate block">{generatedStory.affectedArea}</span>
+                </div>
+                <div className="bg-muted/20 border border-border p-3 rounded-lg">
+                  <span className="text-[10px] font-mono text-muted-foreground block uppercase">Response Tier</span>
+                  <span className="font-semibold text-primary truncate block">{generatedStory.responseLevel}</span>
                 </div>
                 <div className="bg-muted/20 border border-border p-3 rounded-lg">
                   <span className="text-[10px] font-mono text-muted-foreground block uppercase">Primary Hazards</span>
-                  <span className="font-semibold text-amber-400">{generatedStory.hazardDetails}</span>
+                  <span className="font-semibold text-amber-400 truncate block">{generatedStory.hazardDetails}</span>
                 </div>
               </div>
 
@@ -4299,7 +6082,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
                 <div className="space-y-2">
                   {generatedStory.injectEvents.map((inj: any, i: number) => (
                     <div key={i} className="flex items-center gap-3 bg-muted/20 border border-border p-3 rounded-lg text-xs">
-                      <span className="font-mono text-primary font-bold min-w-[60px]">{inj.time}</span>
+                      <span className="font-mono text-primary font-bold min-w-[65px]">{inj.time}</span>
                       <p className="flex-1 text-foreground font-medium">{inj.event}</p>
                       <span className="text-[10px] font-mono bg-muted px-2 py-0.5 rounded text-muted-foreground uppercase">{inj.type}</span>
                     </div>
@@ -4323,17 +6106,17 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
               </div>
 
               {/* Re-configure Footer Action */}
-              <div className="pt-4 border-t border-border flex justify-between items-center">
+              <div className="pt-4 border-t border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <button
                   onClick={() => setTab("selector")}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
                 >
-                  <RotateCcw size={14} /> Re-configure Settings
+                  <RotateCcw size={14} /> Re-configure Scenario Settings
                 </button>
 
-                <span className="text-[11px] font-mono text-muted-foreground">
+                <div className="text-[11px] font-mono text-muted-foreground">
                   Status: Ready for Drill Execution
-                </span>
+                </div>
               </div>
 
             </div>
@@ -4520,20 +6303,24 @@ function ParticipantProfileModal({ participant, onClose, onMessage }: {
 }
 
 function ParticipantsModule() {
-  const [tab, setTab] = useState<ParticipantTab>("profiles");
+  const [tab, setTab] = useState<ParticipantTab>("portal");
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [viewProfile, setViewProfile] = useState<(typeof participants)[number] | null>(null);
-  const [messageTarget, setMessageTarget] = useState<(typeof participants)[number] | null>(null);
+  const [viewProfile, setViewProfile] = useState<any | null>(null);
+  const [messageTarget, setMessageTarget] = useState<any | null>(null);
   const [statusFilter, setStatusFilter] = useState<"all" | "Active" | "Inactive" | "Pending">("all");
   const [attendanceFilter, setAttendanceFilter] = useState<"all" | "Completed" | "In Progress" | "No Show" | "Enrolled">("all");
   const [participantSearch, setParticipantSearch] = useState("");
   const [attendanceSearch, setAttendanceSearch] = useState("");
   const [programSearch, setProgramSearch] = useState("");
+  const [portalSearch, setPortalSearch] = useState("");
+  const [portalStatus, setPortalStatus] = useState<string>("all");
+  const [portalProgram, setPortalProgram] = useState<string>("all");
   const [expandedProgram, setExpandedProgram] = useState<string | null>(null);
   const app = useApp();
-  const participants = [
+
+  const seedParticipants = [
     { id: "P-001", name: "Maria Santos", dept: "Rescue Alpha", role: "Team Leader", level: "Advanced", certs: ["CERT-A", "First Aid", "SCBA"], status: "Active", enrolled: 3, email: "m.santos@ems.gov", phone: "+63 917 200 1044", location: "Quezon City, NCR", employeeId: "EMP-1042", joinDate: "Jan 14, 2024", notes: "Team lead for Rescue Alpha; primary point of contact for earthquake response drills." },
     { id: "P-002", name: "Jose Reyes", dept: "Medical Bravo", role: "Medic", level: "Intermediate", certs: ["EMT-B", "CPR"], status: "Active", enrolled: 2, email: "j.reyes@ems.gov", phone: "+63 917 200 1055", location: "Makati City, NCR", employeeId: "EMP-1078", joinDate: "Mar 2, 2024", notes: "" },
     { id: "P-003", name: "Ana Cruz", dept: "Command HQ", role: "Communications", level: "Advanced", certs: ["CERT-A", "ICS-200"], status: "Active", enrolled: 4, email: "a.cruz@ems.gov", phone: "+63 917 200 1066", location: "Pasig City, NCR", employeeId: "EMP-1015", joinDate: "Nov 8, 2023", notes: "Handles comms net during multi-agency drills." },
@@ -4542,9 +6329,51 @@ function ParticipantsModule() {
     { id: "P-006", name: "Miguel Torres", dept: "Rescue Alpha", role: "Rescue Technician", level: "Intermediate", certs: ["First Aid"], status: "Inactive", enrolled: 1, email: "m.torres@ems.gov", phone: "+63 917 200 1099", location: "San Juan City, NCR", employeeId: "EMP-1061", joinDate: "May 5, 2023", notes: "On extended leave; not currently available for deployment." },
   ];
 
+  // Dynamic participants combining seed roster, self-registered participants, and drill applicants
+  const participants = useMemo(() => {
+    const dynamicFromApp = app.participants.map((p, idx) => ({
+      id: p.id || `P-${100 + idx}`,
+      name: p.name,
+      dept: p.dept || p.department || "Community Residents",
+      role: p.role || "Resident",
+      level: p.level || "Basic",
+      certs: ["Self-Service Enrollee"],
+      status: p.status || "Active",
+      enrolled: app.attendanceRecords.filter(r => r.participantName.toLowerCase() === p.name.toLowerCase() || r.participantId === p.id).length,
+      email: p.email || `${p.name.toLowerCase().replace(/\s+/g, ".")}@culiat.gov.ph`,
+      phone: "+63 917 000 0000",
+      location: "Barangay Culiat, Quezon City",
+      employeeId: `RES-${p.id?.slice(0, 6) || (2000 + idx)}`,
+      joinDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+      notes: "Self-registered participant enrolled via DPTSS portal.",
+    }));
+
+    // Check anyone who applied in attendanceRecords but not yet in seed or app.participants
+    const attendedNames = Array.from(new Set(app.attendanceRecords.map(r => r.participantName)));
+    const extraFromAttendance = attendedNames
+      .filter(name => !seedParticipants.some(s => s.name.toLowerCase() === name.toLowerCase()) && !dynamicFromApp.some(d => d.name.toLowerCase() === name.toLowerCase()))
+      .map((name, idx) => ({
+        id: `P-${300 + idx}`,
+        name,
+        dept: "Community Residents",
+        role: "Resident",
+        level: "Basic",
+        certs: ["Self-Service Applicant"],
+        status: "Active",
+        enrolled: app.attendanceRecords.filter(r => r.participantName.toLowerCase() === name.toLowerCase()).length,
+        email: `${name.toLowerCase().replace(/\s+/g, ".")}@culiat.gov.ph`,
+        phone: "+63 917 000 0000",
+        location: "Barangay Culiat, Quezon City",
+        employeeId: `RES-${3000 + idx}`,
+        joinDate: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+        notes: "Participant with self-service drill applications.",
+      }));
+
+    return [...seedParticipants, ...dynamicFromApp, ...extraFromAttendance];
+  }, [app.participants, app.attendanceRecords]);
+
   const allParticipants = [
-    ...participants.map(p => ({ id: p.id, name: p.name, department: p.dept, role: p.role, level: p.level, certifications: p.certs.join("; "), status: p.status, enrolledPrograms: p.enrolled, source: "Seed Roster" })),
-    ...app.participants.map(p => ({ id: p.id, name: p.name, department: p.dept || "—", role: p.role || "—", level: p.level || "—", certifications: "—", status: p.status || "Pending", enrolledPrograms: 0, source: "Self-Registered" })),
+    ...participants.map(p => ({ id: p.id, name: p.name, department: p.dept, role: p.role, level: p.level, certifications: p.certs.join("; "), status: p.status, enrolledPrograms: p.enrolled, source: p.id.startsWith("P-00") ? "Seed Roster" : "Self-Registered" })),
   ];
   const allAttendance = app.attendanceRecords.map(r => ({ id: r.id, participant: r.participantName, program: r.program, date: r.date, status: r.status, score: r.score ?? "—", certificate: r.certificate ?? "—" }));
 
@@ -4561,6 +6390,23 @@ function ParticipantsModule() {
       if (!q) return true;
       return [r.participantName, r.program, r.participantId ?? "", r.assessor ?? ""].join(" ").toLowerCase().includes(q);
     });
+
+  // Filtered Self-Service applications stream from Browse Drills
+  const portalApplications = useMemo(() => {
+    return app.attendanceRecords.filter(r => {
+      const q = portalSearch.trim().toLowerCase();
+      const matchesQ = !q || [
+        r.participantName,
+        r.program,
+        r.participantId ?? "",
+        r.sessionId ?? "",
+        r.status,
+      ].join(" ").toLowerCase().includes(q);
+      const matchesStatus = portalStatus === "all" || r.status === portalStatus;
+      const matchesProg = portalProgram === "all" || r.program === portalProgram;
+      return matchesQ && matchesStatus && matchesProg;
+    });
+  }, [app.attendanceRecords, portalSearch, portalStatus, portalProgram]);
 
   const programGroups = Object.entries(
     app.attendanceRecords.reduce<Record<string, typeof app.attendanceRecords>>((acc, r) => {
@@ -4631,7 +6477,17 @@ function ParticipantsModule() {
           <button onClick={() => setShowExportModal(true)} className="flex items-center gap-2 bg-secondary text-muted-foreground px-3 py-2 rounded-md text-base font-semibold hover:bg-secondary/90"><ClipboardList size={16} />Export</button>
         </div>
       </div>
-      <TabBar tabs={[{ id: "profiles", label: "User Profiles", icon: UserCheck }, { id: "byProgram", label: "Users Per Program", icon: Layers }, { id: "attendance", label: "Attendance Records", icon: ClipboardList }, { id: "portal", label: "Self-Service Portal", icon: LogIn }, { id: "notifications", label: "Notifications", icon: Mail }]} active={tab} onChange={v => setTab(v as ParticipantTab)} />
+      <TabBar
+        tabs={[
+          { id: "portal", label: `Self-Service Portal (${app.attendanceRecords.filter(r => r.status === "Enrolled").length})`, icon: LogIn },
+          { id: "profiles", label: "User Profiles", icon: UserCheck },
+          { id: "byProgram", label: "Users Per Program", icon: Layers },
+          { id: "attendance", label: "Attendance Records", icon: ClipboardList },
+          { id: "notifications", label: "Notifications", icon: Mail },
+        ]}
+        active={tab}
+        onChange={v => setTab(v as ParticipantTab)}
+      />
       {tab === "profiles" && (
         <div className="space-y-3">
           <div className="bg-card border border-border rounded-lg p-3 flex flex-wrap items-center justify-between gap-3">
@@ -4793,7 +6649,372 @@ function ParticipantsModule() {
         </div>
       )}
       {tab === "portal" && (
-        <div className="bg-card border border-primary/15 rounded-lg p-4 flex items-center gap-3"><Info size={16} className="text-primary" /><p className="text-xs text-muted-foreground">Self-service drill sign-up portal is available to all registered participants. Manage slot capacity and open/close registration per session.</p></div>
+        <div className="space-y-4">
+          {/* Live Stream Banner */}
+          <div className="bg-primary/10 border border-primary/25 rounded-xl p-4 flex items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start sm:items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/20 flex items-center justify-center text-primary shrink-0 mt-0.5 sm:mt-0">
+                <LogIn size={18} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-foreground">Self-Service Application Queue</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Live Sync Active
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  When residents apply in the <span className="text-foreground font-semibold">Browse Drills</span> portal, their applications and slot reservations appear here immediately for admin verification.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => app.exportCSV("attendance")}
+              className="hidden sm:flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md font-semibold bg-secondary hover:bg-secondary/80 text-foreground transition-colors shrink-0 cursor-pointer"
+            >
+              <Download size={13} /> Export Applications
+            </button>
+          </div>
+
+          {/* Quick Stats Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-card border border-border rounded-xl p-3.5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold">
+                <Users size={18} />
+              </div>
+              <div>
+                <div className="text-xl font-bold font-display text-foreground">{app.attendanceRecords.length}</div>
+                <div className="text-[11px] font-mono text-muted-foreground">Total Applications</div>
+              </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-3.5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center font-bold">
+                <Clock size={18} />
+              </div>
+              <div>
+                <div className="text-xl font-bold font-display text-cyan-400">
+                  {app.attendanceRecords.filter(r => r.status === "Enrolled").length}
+                </div>
+                <div className="text-[11px] font-mono text-muted-foreground">Enrolled / Pending</div>
+              </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-3.5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-orange-500/10 text-orange-400 flex items-center justify-center font-bold">
+                <Activity size={18} />
+              </div>
+              <div>
+                <div className="text-xl font-bold font-display text-orange-400">
+                  {app.attendanceRecords.filter(r => r.status === "In Progress").length}
+                </div>
+                <div className="text-[11px] font-mono text-muted-foreground">In Training</div>
+              </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-xl p-3.5 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center font-bold">
+                <CheckCircle size={18} />
+              </div>
+              <div>
+                <div className="text-xl font-bold font-display text-emerald-400">
+                  {app.attendanceRecords.filter(r => r.status === "Completed").length}
+                </div>
+                <div className="text-[11px] font-mono text-muted-foreground">Completed</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Search and Filters */}
+          <div className="bg-card border border-border rounded-xl p-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
+              <div className="relative flex-1 max-w-xs">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={portalSearch}
+                  onChange={e => setPortalSearch(e.target.value)}
+                  placeholder="Search applicant name, program, ID..."
+                  className="w-full bg-input-background border border-border rounded-md pl-9 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <select
+                value={portalProgram}
+                onChange={e => setPortalProgram(e.target.value)}
+                className="bg-input-background border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="all">All Training Programs</option>
+                {Array.from(new Set(app.attendanceRecords.map(r => r.program))).map(prog => (
+                  <option key={prog} value={prog}>{prog}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(["all", "Enrolled", "In Progress", "Completed", "No Show"] as const).map(f => {
+                const count = f === "all" ? app.attendanceRecords.length : app.attendanceRecords.filter(r => r.status === f).length;
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setPortalStatus(f)}
+                    className={`px-3 py-1.5 text-xs font-mono rounded-md transition-colors cursor-pointer ${portalStatus === f
+                      ? "bg-primary text-primary-foreground font-semibold"
+                      : "bg-secondary text-muted-foreground hover:text-foreground"
+                      }`}
+                  >
+                    {f === "all" ? "All Applications" : f} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Applications List */}
+          {portalApplications.length === 0 ? (
+            <div className="bg-card border border-border rounded-xl p-10 text-center space-y-2">
+              <div className="w-12 h-12 rounded-full bg-secondary mx-auto flex items-center justify-center text-muted-foreground">
+                <LogIn size={20} />
+              </div>
+              <h3 className="text-sm font-semibold text-foreground">No Self-Service Applications Found</h3>
+              <p className="text-xs text-muted-foreground max-w-md mx-auto">
+                No applicants match the current filter. When a community resident clicks &quot;+ Apply&quot; in Browse Drills, their enrollment and slot reservation will be listed here.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              {portalApplications.map(r => {
+                const matchingSession = app.sessions.find(s => s.id === r.sessionId || s.course.toLowerCase() === r.program.toLowerCase());
+                const matchingProg = app.programs.find(p => p.title.toLowerCase() === r.program.toLowerCase());
+
+                return (
+                  <div
+                    key={r.id}
+                    className="bg-card border border-border hover:border-primary/40 rounded-xl p-4 transition-all shadow-xs"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-start gap-3.5">
+                        <div className="w-10 h-10 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center text-sm font-bold text-primary shrink-0 mt-0.5">
+                          {r.participantName.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase() || "PT"}
+                        </div>
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="text-sm font-semibold text-foreground">{r.participantName}</h4>
+                            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-secondary text-muted-foreground">
+                              {r.participantId || "Resident"}
+                            </span>
+                            <Badge status={r.status}>{r.status}</Badge>
+                            {r.status === "Enrolled" && (
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                                Self-Service Applied
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="font-semibold text-foreground flex items-center gap-1">
+                              <Target size={12} className="text-primary" /> {r.program}
+                            </span>
+                            {matchingProg?.level && (
+                              <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-secondary text-muted-foreground">
+                                {matchingProg.level}
+                              </span>
+                            )}
+                            <span className="flex items-center gap-1 font-mono text-[11px]">
+                              <Calendar size={11} /> Applied: {new Date(r.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                            </span>
+                            {r.sessionId && (
+                              <span className="font-mono text-[11px]">
+                                Session: {r.sessionId}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Headcount / Session Slot Info */}
+                      {matchingSession && (
+                        <div className="hidden lg:block text-right shrink-0 pr-4">
+                          <div className="text-xs font-semibold text-foreground">
+                            {matchingSession.enrolled} / {matchingSession.capacity} slots filled
+                          </div>
+                          <div className="w-28 h-1.5 bg-secondary rounded-full overflow-hidden mt-1 ml-auto">
+                            <div
+                              className="h-full bg-primary rounded-full"
+                              style={{ width: `${Math.min(100, Math.round((matchingSession.enrolled / matchingSession.capacity) * 100))}%` }}
+                            />
+                          </div>
+                          <div className="text-[10px] font-mono text-muted-foreground mt-0.5">
+                            {Math.max(0, matchingSession.capacity - matchingSession.enrolled)} available
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons */}
+                      <div className="flex items-center gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-border">
+                        {r.status === "Enrolled" && (
+                          <button
+                            onClick={() => {
+                              app.updateAttendanceRecord(r.id, { status: "In Progress" });
+                              app.addNotification({
+                                type: "Registration",
+                                subject: `Slot Confirmed: ${r.program}`,
+                                body: `Hello ${r.participantName}, your self-service application for "${r.program}" has been approved. Please arrive on time.`,
+                                status: "Sent",
+                                audience: ["user"],
+                              }, true);
+                              app.showToast(`Approved & confirmed slot for ${r.participantName}.`, "success", "Application Approved");
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-md transition-colors cursor-pointer"
+                            title="Confirm this resident's training application"
+                          >
+                            <Check size={13} /> Confirm Slot
+                          </button>
+                        )}
+
+                        {r.status === "In Progress" && (
+                          <button
+                            onClick={() => {
+                              const certCode = `CERT-${Date.now().toString(36).toUpperCase().slice(-5)}`;
+                              app.updateAttendanceRecord(r.id, { status: "Completed", score: 95, certificate: certCode });
+                              app.addNotification({
+                                type: "Evaluation",
+                                subject: `Training Completed: ${r.program}`,
+                                body: `Congratulations ${r.participantName}! You have successfully completed "${r.program}". Certificate ID: ${certCode}.`,
+                                status: "Sent",
+                                audience: ["user"],
+                              }, true);
+                              app.showToast(`Marked ${r.participantName} as Completed (${certCode})!`, "success", "Training Completed");
+                            }}
+                            className="flex items-center gap-1 text-xs font-semibold bg-primary hover:bg-primary/90 text-primary-foreground px-3 py-1.5 rounded-md transition-colors cursor-pointer"
+                            title="Mark completed with certificate"
+                          >
+                            <Award size={13} /> Mark Completed
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => {
+                            const pMatch = participants.find(p => p.name.toLowerCase() === r.participantName.toLowerCase());
+                            if (pMatch) {
+                              setMessageTarget(pMatch);
+                            } else {
+                              setMessageTarget({
+                                id: r.participantId || "P-RES",
+                                name: r.participantName,
+                                dept: "Community Residents",
+                                email: `${r.participantName.toLowerCase().replace(/\s+/g, ".")}@culiat.gov.ph`,
+                                role: "Resident",
+                                status: "Active",
+                                certs: [],
+                                enrolled: 1,
+                                phone: "+63 917 000 0000",
+                                location: "Barangay Culiat",
+                                employeeId: "RES-101",
+                                joinDate: "Recent",
+                                notes: "",
+                              });
+                            }
+                          }}
+                          className="p-1.5 rounded-md bg-secondary hover:bg-secondary/80 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                          title="Message Applicant"
+                        >
+                          <Mail size={14} />
+                        </button>
+
+                        <button
+                          onClick={() => {
+                            if (confirm(`Remove self-service application for ${r.participantName} in ${r.program}?`)) {
+                              app.removeAttendanceRecord(r.id);
+                              if (matchingSession && matchingSession.enrolled > 0) {
+                                app.updateSession(matchingSession.id, {
+                                  enrolled: Math.max(0, matchingSession.enrolled - 1),
+                                });
+                              }
+                              app.addNotification({
+                                type: "Withdrawal",
+                                subject: `Application Cancelled: ${r.program}`,
+                                body: `Your application for "${r.program}" has been cancelled by the admin.`,
+                                status: "Sent",
+                                audience: ["user"],
+                              }, true);
+                            }
+                          }}
+                          className="p-1.5 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition-colors cursor-pointer"
+                          title="Cancel / Remove Application"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Training Sessions Capacity Overview */}
+          <div className="bg-card border border-border rounded-xl p-4 mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <h3 className="text-sm font-bold text-foreground">Active Drill Sessions &amp; Capacity Control</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Real-time capacity tracking for self-registration slots in Browse Drills.</p>
+              </div>
+              <span className="text-xs font-mono text-muted-foreground">
+                {app.sessions.length} Available Sessions
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {app.sessions.map(s => {
+                const applicantsCount = app.attendanceRecords.filter(r => r.sessionId === s.id || r.program.toLowerCase() === s.course.toLowerCase()).length;
+                const filledPct = Math.round((s.enrolled / s.capacity) * 100);
+                const isSelected = portalProgram === s.course;
+
+                return (
+                  <div
+                    key={s.id}
+                    onClick={() => setPortalProgram(isSelected ? "all" : s.course)}
+                    className={`border rounded-lg p-3.5 transition-all cursor-pointer ${isSelected
+                      ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                      : "border-border bg-secondary/20 hover:border-border/80"
+                      }`}
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-foreground truncate">{s.course}</div>
+                        <div className="text-[11px] font-mono text-muted-foreground mt-0.5">
+                          {s.date} · {s.time}
+                        </div>
+                      </div>
+                      <Badge status={s.status ?? "Scheduled"}>{s.status ?? "Scheduled"}</Badge>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground mb-1">
+                        <span>Headcount</span>
+                        <span className="font-bold text-foreground">{s.enrolled} / {s.capacity} ({filledPct}%)</span>
+                      </div>
+                      <div className="w-full h-1.5 bg-secondary rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${filledPct >= 90 ? "bg-red-400" : filledPct >= 70 ? "bg-amber-400" : "bg-primary"}`}
+                          style={{ width: `${Math.min(100, filledPct)}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3 pt-2 border-t border-border/50 flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground font-mono">
+                        {applicantsCount} in portal
+                      </span>
+                      <span className="font-semibold text-primary">
+                        {isSelected ? "Showing applicants ✓" : "Click to filter →"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       )}
       {tab === "notifications" && (
         <div className="space-y-2">{[
@@ -4822,45 +7043,126 @@ const trendHistory = [
   { drill: "D6", avgScore: 82, passRate: 81, respTime: 5.2 },
 ];
 
-const ASSESSOR_PARTICIPANTS = ["Maria Santos", "Jose Reyes", "Carlos Bautista"];
+const DEFAULT_ASSESSOR_PARTICIPANTS = [
+  "Maria Santos",
+  "Jose Reyes",
+  "Carlos Bautista",
+  "Ana Cruz",
+  "Elena Villanueva"
+];
+
 const SCORE_CATEGORIES = ["Command", "Protocols", "Response Speed", "Coordination"];
 
-export function EvalModule() {
+type AssessorSubmission = {
+  id?: string;
+  name: string;
+  score: number;
+  note: string;
+  scores?: Record<string, number>;
+  date?: string;
+};
+
+export function EvalModule({ auth }: { auth?: AuthUser }) {
   const app = useApp();
   const [tab, setTab] = useState<EvalTab>("objectives");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [objs, setObjs] = useState([
-    { id: 1, text: "IC assumes command on radio net", done: true, time: "1:42", limit: "2 min" },
-    { id: 2, text: "Gas valve shut off at utility panel", done: true, time: "1:58", limit: "2 min" },
-    { id: 3, text: "Evacuation route cleared and opened", done: false, time: "6:12", limit: "5 min" },
-    { id: 4, text: "Triage zone with START protocol", done: true, time: "4:31", limit: "5 min" },
-    { id: 5, text: "SITREP transmitted to EOC", done: true, time: "9:05", limit: "10 min" },
-    { id: 6, text: "Accountability check completed", done: false, time: "—", limit: "10 min" },
-  ]);
-
+  const objs = app.evalObjectives;
   const passed = objs.filter(o => o.done).length;
-  const radarData = [
-    { subject: "Command", A: 88, B: 72 },
-    { subject: "Response", A: 75, B: 80 },
-    { subject: "Comms", A: 92, B: 65 },
-    { subject: "Protocols", A: 85, B: 78 },
-    { subject: "Safety", A: 90, B: 82 },
-    { subject: "Coord.", A: 78, B: 70 },
-  ];
 
-  const [assessParticipant, setAssessParticipant] = useState(ASSESSOR_PARTICIPANTS[0]);
-  const [assessScores, setAssessScores] = useState<Record<string, number>>(() =>
-    Object.fromEntries(SCORE_CATEGORIES.map(c => [c, Math.floor(Math.random() * 20 + 75)]))
-  );
+  const isAdmin = auth ? (auth.role === "admin" || auth.role === "superadmin") : true;
+
+  const handleToggleObjective = (id: number) => {
+    if (!isAdmin) {
+      app.showToast("Only Admin or Super Admin can check evaluation objectives.", "warning", "Admin Access Required");
+      return;
+    }
+    app.toggleEvalObjective(id, auth?.name || "Capt. Santos");
+  };
+
+  // Persistent assessor submissions state
+  const [submissions, setSubmissions] = useState<AssessorSubmission[]>(() => {
+    try {
+      const saved = localStorage.getItem("dptss_assessor_submissions");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error("Error reading assessor submissions from localStorage", e);
+    }
+    return [
+      { name: "Maria Santos", score: 94, note: "Excellent command presence.", scores: { Command: 95, Protocols: 94, "Response Speed": 92, Coordination: 95 }, date: "Jun 28" },
+      { name: "Ana Cruz", score: 88, note: "Strong comms, minor SITREP delay.", scores: { Command: 88, Protocols: 90, "Response Speed": 86, Coordination: 88 }, date: "Jun 28" },
+      { name: "Jose Reyes", score: 76, note: "Triage initiated, slow IC comms.", scores: { Command: 75, Protocols: 80, "Response Speed": 72, Coordination: 77 }, date: "Jun 28" },
+    ];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dptss_assessor_submissions", JSON.stringify(submissions));
+    } catch (e) {
+      console.error("Error saving assessor submissions to localStorage", e);
+    }
+  }, [submissions]);
+
+  // Dynamic participants list combining seed data, registered participants, and applicants
+  const assessorParticipantOptions = useMemo(() => {
+    const names = new Set<string>();
+    DEFAULT_ASSESSOR_PARTICIPANTS.forEach(n => names.add(n));
+    app.participants.forEach(p => { if (p.name?.trim()) names.add(p.name.trim()); });
+    app.attendanceRecords.forEach(r => { if (r.participantName?.trim()) names.add(r.participantName.trim()); });
+    submissions.forEach(s => { if (s.name?.trim()) names.add(s.name.trim()); });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [app.participants, app.attendanceRecords, submissions]);
+
+  const [assessParticipant, setAssessParticipant] = useState(assessorParticipantOptions[0] || "Maria Santos");
+  const [assessScores, setAssessScores] = useState<Record<string, number>>({
+    Command: 81,
+    Protocols: 81,
+    "Response Speed": 83,
+    Coordination: 86,
+  });
   const [assessNotes, setAssessNotes] = useState("");
-  const [submissions, setSubmissions] = useState([
-    { name: "Maria Santos", score: 94, note: "Excellent command presence." },
-    { name: "Ana Cruz", score: 88, note: "Strong comms, minor SITREP delay." },
-    { name: "Jose Reyes", score: 76, note: "Triage initiated, slow IC comms." },
-  ]);
   const [justSubmitted, setJustSubmitted] = useState(false);
 
-  const overallScore = Math.round(SCORE_CATEGORIES.reduce((sum, c) => sum + (assessScores[c] ?? 0), 0) / SCORE_CATEGORIES.length);
+  // Sync inputs when participant is selected
+  const handleSelectParticipant = (name: string) => {
+    setAssessParticipant(name);
+    const existing = submissions.find(s => s.name.toLowerCase() === name.toLowerCase());
+    if (existing && existing.scores) {
+      setAssessScores({
+        Command: existing.scores.Command ?? 81,
+        Protocols: existing.scores.Protocols ?? 81,
+        "Response Speed": existing.scores["Response Speed"] ?? 83,
+        Coordination: existing.scores.Coordination ?? 86,
+      });
+      setAssessNotes(existing.note || "");
+    } else {
+      const attRecord = app.attendanceRecords.find(r => r.participantName.toLowerCase() === name.toLowerCase() && typeof r.score === "number");
+      if (attRecord && typeof attRecord.score === "number") {
+        const s = attRecord.score;
+        setAssessScores({
+          Command: s,
+          Protocols: s,
+          "Response Speed": s,
+          Coordination: s,
+        });
+        setAssessNotes("");
+      } else {
+        setAssessScores({
+          Command: 81,
+          Protocols: 81,
+          "Response Speed": 83,
+          Coordination: 86,
+        });
+        setAssessNotes("");
+      }
+    }
+  };
+
+  const overallScore = Math.round(
+    SCORE_CATEGORIES.reduce((sum, c) => sum + (assessScores[c] ?? 0), 0) / SCORE_CATEGORIES.length
+  );
 
   const knownAssessorNames = Array.from(new Set([
     ...app.attendanceRecords.map(r => r.assessor).filter(Boolean) as string[],
@@ -4874,19 +7176,126 @@ export function EvalModule() {
 
   const handleSubmitScore = () => {
     if (!assessParticipant) return;
-    setSubmissions(prev => [{ name: assessParticipant, score: overallScore, note: assessNotes.trim() || "No field observations recorded." }, ...prev]);
-    app.addNotification({ type: "Evaluation", subject: `Score submitted for ${assessParticipant}: ${overallScore}%`, status: "Sent" });
-    setAssessNotes("");
-    setAssessScores(Object.fromEntries(SCORE_CATEGORIES.map(c => [c, Math.floor(Math.random() * 20 + 75)])));
+
+    const newSub: AssessorSubmission = {
+      id: `SUB-${Date.now()}`,
+      name: assessParticipant,
+      score: overallScore,
+      note: assessNotes.trim() || "Field observations recorded and verified.",
+      scores: { ...assessScores },
+      date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    };
+
+    setSubmissions(prev => [newSub, ...prev.filter(s => s.name.toLowerCase() !== assessParticipant.toLowerCase())]);
+
+    // Update or add record in app.attendanceRecords
+    const existingAtt = app.attendanceRecords.find(
+      r => r.participantName.toLowerCase() === assessParticipant.toLowerCase()
+    );
+
+    if (existingAtt) {
+      app.updateAttendanceRecord(existingAtt.id, {
+        score: overallScore,
+        status: "Completed",
+        evaluated: true,
+        assessor: auth?.name || "Capt. Santos",
+      });
+    } else {
+      app.addAttendanceRecord({
+        participantName: assessParticipant,
+        program: "Earthquake Response — Advanced",
+        date: new Date().toISOString().split("T")[0],
+        status: "Completed",
+        score: overallScore,
+        evaluated: true,
+        assessor: auth?.name || "Capt. Santos",
+      });
+    }
+
+    app.addNotification({
+      type: "Evaluation",
+      subject: `Evaluation recorded for ${assessParticipant}: ${overallScore}%`,
+      body: `Assessor evaluated ${assessParticipant} at ${overallScore}% in Earthquake Response — Advanced. Command: ${assessScores.Command ?? 0}, Protocols: ${assessScores.Protocols ?? 0}, Response Speed: ${assessScores["Response Speed"] ?? 0}, Coordination: ${assessScores.Coordination ?? 0}.`,
+      status: "Sent",
+      audience: ["admin", "superadmin", "user"],
+    }, true);
+
+    app.showToast(`Recorded score of ${overallScore}% for ${assessParticipant}.`, "success", "Score Recorded");
     setJustSubmitted(true);
     setTimeout(() => setJustSubmitted(false), 1800);
   };
+
+  const handleDeleteSubmission = (name: string) => {
+    setSubmissions(prev => prev.filter(s => s.name.toLowerCase() !== name.toLowerCase()));
+    app.showToast(`Removed evaluation submission for ${name}.`, "info", "Evaluation Removed");
+  };
+
+  // Dynamic Competency Radar Data based on live submissions and objective verification
+  const radarData = useMemo(() => {
+    let totalCommand = 0, countCommand = 0;
+    let totalResponse = 0, countResponse = 0;
+    let totalProtocols = 0, countProtocols = 0;
+    let totalCoord = 0, countCoord = 0;
+
+    submissions.forEach(s => {
+      if (s.scores) {
+        if (s.scores["Command"] != null) { totalCommand += s.scores["Command"]; countCommand++; }
+        if (s.scores["Response Speed"] != null) { totalResponse += s.scores["Response Speed"]; countResponse++; }
+        if (s.scores["Protocols"] != null) { totalProtocols += s.scores["Protocols"]; countProtocols++; }
+        if (s.scores["Coordination"] != null) { totalCoord += s.scores["Coordination"]; countCoord++; }
+      }
+    });
+
+    const avgCommand = countCommand > 0 ? Math.round(totalCommand / countCommand) : 88;
+    const avgResponse = countResponse > 0 ? Math.round(totalResponse / countResponse) : 75;
+    const avgProtocols = countProtocols > 0 ? Math.round(totalProtocols / countProtocols) : 85;
+    const avgCoord = countCoord > 0 ? Math.round(totalCoord / countCoord) : 78;
+
+    const objRatio = objs.length > 0 ? passed / objs.length : 0;
+    const avgComms = Math.min(100, Math.max(60, Math.round((avgCoord * 0.55 + avgCommand * 0.45) + (objRatio * 8))));
+    const avgSafety = Math.min(100, Math.max(65, Math.round((avgProtocols * 0.65 + 15 + (objRatio * 20)))));
+
+    return [
+      { subject: "Command", A: avgCommand, B: 72 },
+      { subject: "Response", A: avgResponse, B: 80 },
+      { subject: "Comms", A: avgComms, B: 65 },
+      { subject: "Protocols", A: avgProtocols, B: 78 },
+      { subject: "Safety", A: avgSafety, B: 82 },
+      { subject: "Coord.", A: avgCoord, B: 70 },
+    ];
+  }, [submissions, objs, passed]);
+
+  // Dynamic Individual Scores List in Analytics Tab
+  const individualScoresList = useMemo(() => {
+    const scoreMap = new Map<string, number>();
+
+    scoreMap.set("Maria Santos", 94);
+    scoreMap.set("Jose Reyes", 76);
+    scoreMap.set("Carlos Bautista", 58);
+    scoreMap.set("Ana Cruz", 88);
+    scoreMap.set("Elena Villanueva", 91);
+
+    app.attendanceRecords.forEach(r => {
+      if (typeof r.score === "number") {
+        scoreMap.set(r.participantName, r.score);
+      }
+    });
+
+    submissions.forEach(s => {
+      scoreMap.set(s.name, s.score);
+    });
+
+    return Array.from(scoreMap.entries()).map(([name, score]) => ({
+      name,
+      score: Math.min(100, Math.max(0, Math.round(score))),
+    })).sort((a, b) => b.score - a.score);
+  }, [submissions, app.attendanceRecords]);
 
   // Upgraded AI Evaluation Logic Engine with Assessor Data Integration
   const aiReport = useMemo(() => {
     const total = objs.length;
     const missedObjs = objs.filter(o => !o.done);
-    const passPercentage = Math.round((passed / total) * 100);
+    const passPercentage = total > 0 ? Math.round((passed / total) * 100) : 0;
 
     // 1. Compute Assessor Dashboard Scores
     const totalAssessorScore = submissions.reduce((acc, s) => acc + s.score, 0);
@@ -4913,13 +7322,20 @@ export function EvalModule() {
     // Readiness Level Assessment
     let readinessStatus = "CRITICAL";
     let statusColor = "text-red-400";
-    if (passPercentage >= 85) {
+    if (passed === 0) {
+      readinessStatus = "AWAITING VERIFICATION";
+      statusColor = "text-yellow-400";
+    } else if (passPercentage >= 85) {
       readinessStatus = "OPERATIONAL READY";
       statusColor = "text-green-400";
     } else if (passPercentage >= 65) {
       readinessStatus = "MODERATE CAPABILITY";
       statusColor = "text-yellow-400";
     }
+
+    const summaryText = passed === 0
+      ? `Drill evaluation objectives are currently unchecked. Standby for live verification by Admin evaluator. Field assessor evaluations average ${avgAssessorScore}%.`
+      : `The unit demonstrates an overall objective completion rate of ${passPercentage}% (${passed}/${total} objectives verified by Admin). Field assessor evaluations average ${avgAssessorScore}%. ${gapInsight} Response times have improved by ${speedGain} mins across drills (D1-D6).`;
 
     return {
       passPercentage,
@@ -4930,7 +7346,7 @@ export function EvalModule() {
       lowestCompetency,
       readinessStatus,
       statusColor,
-      summaryText: `The unit demonstrates an overall objective completion rate of ${passPercentage}%. Field assessor evaluations average ${avgAssessorScore}%. ${gapInsight} Response times have improved by ${speedGain} mins across drills (D1-D6).`
+      summaryText
     };
   }, [objs, passed, submissions]);
 
@@ -4962,26 +7378,110 @@ export function EvalModule() {
 
       {/* Tab 1: Objectives */}
       {tab === "objectives" && (
-        <div className="space-y-3">
-          <div className="grid grid-cols-4 gap-3">
-            {[{ label: "Total", value: objs.length, color: "text-foreground" }, { label: "Passed", value: passed, color: "text-green-400" }, { label: "Missed", value: objs.length - passed, color: "text-red-400" }, { label: "Score", value: `${Math.round(passed / objs.length * 100)}%`, color: "text-primary" }].map(s => (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-card border border-border rounded-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary flex-shrink-0">
+                <ShieldCheck size={18} />
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-foreground flex items-center gap-2">
+                  <span>Drill Evaluation & Verification Engine</span>
+                  {isAdmin ? (
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-green-500/10 text-green-400 border border-green-500/20">
+                      Admin Access Active ({auth?.name || "Capt. Santos"})
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      Participant Read-Only View
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {isAdmin
+                    ? "Check the boxes to record passed drill milestones. Results immediately update the evaluation score and sync to participant dashboards."
+                    : "Objective verification is restricted to administrators and certified evaluators."}
+                </p>
+              </div>
+            </div>
+            {isAdmin && (
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                {passed > 0 && (
+                  <button
+                    onClick={() => app.resetEvalObjectives()}
+                    className="px-2.5 py-1.5 rounded text-xs font-mono text-muted-foreground hover:text-red-400 bg-secondary hover:bg-red-500/10 transition-colors border border-border flex items-center gap-1.5 cursor-pointer"
+                    title="Reset all objectives to unchecked"
+                  >
+                    <RefreshCw size={12} />
+                    <span>Reset to Unchecked</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { label: "Total", value: objs.length, color: "text-foreground" },
+              { label: "Passed", value: passed, color: "text-green-400" },
+              { label: "Missed / Pending", value: objs.length - passed, color: "text-red-400" },
+              { label: "Score", value: `${objs.length > 0 ? Math.round(passed / objs.length * 100) : 0}%`, color: "text-primary" }
+            ].map(s => (
               <div key={s.label} className="bg-card border border-border rounded-lg p-4">
                 <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div>
                 <div className={`text-2xl font-bold font-display ${s.color}`}>{s.value}</div>
               </div>
             ))}
           </div>
-          <div className="bg-card border border-border rounded-lg divide-y divide-border">
+
+          <div className="bg-card border border-border rounded-lg divide-y divide-border overflow-hidden">
             {objs.map(o => (
-              <div key={o.id} className="flex items-center gap-4 px-4 py-3 hover:bg-secondary/30">
-                <button onClick={() => setObjs(prev => prev.map(x => x.id === o.id ? { ...x, done: !x.done } : x))}>
-                  {o.done ? <CheckSquare size={17} className="text-green-400" /> : <Square size={17} className="text-muted-foreground" />}
+              <div
+                key={o.id}
+                className={`flex items-center gap-3 sm:gap-4 px-4 py-3 transition-colors ${o.done ? "bg-green-500/[0.03] hover:bg-green-500/[0.07]" : "hover:bg-secondary/30"}`}
+              >
+                <button
+                  disabled={!isAdmin}
+                  onClick={() => handleToggleObjective(o.id)}
+                  className={`p-1 rounded transition-transform active:scale-90 ${!isAdmin ? "cursor-not-allowed opacity-50" : "cursor-pointer hover:bg-secondary"}`}
+                  title={isAdmin ? (o.done ? "Click to uncheck objective" : "Click to check and record objective") : "Only admin can check the checkbox"}
+                >
+                  {o.done ? <CheckSquare size={18} className="text-green-400" /> : <Square size={18} className="text-muted-foreground hover:text-foreground" />}
                 </button>
-                <span className="flex-1 text-xs text-foreground">{o.text}</span>
-                <span className={`text-xs font-mono font-bold ${o.done ? "text-green-400" : "text-red-400"}`}>{o.time}</span>
-                <span className="text-[12px] font-mono text-muted-foreground">/ {o.limit}</span>
+                <div className="flex-1 min-w-0">
+                  <span className={`text-xs font-medium block ${o.done ? "text-foreground font-semibold" : "text-foreground/80"}`}>{o.text}</span>
+                  {o.verifiedBy && (
+                    <span className="text-[10px] font-mono text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <CheckCircle size={10} className="text-green-400 flex-shrink-0" />
+                      <span>Verified & recorded by <strong className="text-foreground">{o.verifiedBy}</strong> {o.verifiedAt ? `(${new Date(o.verifiedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : ""}</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-mono font-bold ${o.done ? "text-green-400" : "text-muted-foreground"}`}>{o.time}</span>
+                  <span className="text-[12px] font-mono text-muted-foreground">/ {o.limit}</span>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${o.done ? "bg-green-500/10 text-green-400 border-green-500/20" : "bg-secondary text-muted-foreground border-border"}`}>
+                    {o.done ? "PASSED" : "PENDING"}
+                  </span>
+                </div>
               </div>
             ))}
+          </div>
+
+          {/* Recording Status Bar */}
+          <div className="p-3.5 bg-card border border-border rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${passed > 0 ? "bg-green-400 animate-pulse" : "bg-yellow-400"}`} />
+              <span className="font-mono text-muted-foreground uppercase text-[11px]">Evaluation Database:</span>
+              <span className="font-medium text-foreground">
+                {passed === 0
+                  ? "Standby · All 6 objectives unchecked · Awaiting Admin verification"
+                  : `Recorded in Performance Evaluation Dashboard: ${passed} of ${objs.length} objectives verified (${Math.round(passed / objs.length * 100)}% Passing Score)`}
+              </span>
+            </div>
+            <div className="text-[11px] font-mono text-muted-foreground">
+              Drill ID: <span className="text-primary font-bold">EQR-ADV-2026</span> · District 4 Field HQ
+            </div>
           </div>
         </div>
       )}
@@ -4990,7 +7490,19 @@ export function EvalModule() {
       {tab === "analytics" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="bg-card border border-border rounded-lg p-5">
-            <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-4">Competency Radar</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Competency Radar</h3>
+              <div className="flex items-center gap-3 text-[11px] font-mono">
+                <span className="flex items-center gap-1.5 text-foreground">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#f0a500]" />
+                  Active Unit ({Math.round(radarData.reduce((s, r) => s + r.A, 0) / radarData.length)}%)
+                </span>
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#58a6ff]" />
+                  Target Benchmark (75%)
+                </span>
+              </div>
+            </div>
             <ResponsiveContainer width="100%" height={220}>
               <RadarChart data={radarData}>
                 <PolarGrid stroke="rgba(240,246,252,0.08)" />
@@ -5002,15 +7514,31 @@ export function EvalModule() {
             </ResponsiveContainer>
           </div>
           <div className="bg-card border border-border rounded-lg p-5">
-            <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-3">Individual Scores</h3>
-            <div className="space-y-2">
-              {[{ name: "Maria Santos", score: 94 }, { name: "Jose Reyes", score: 76 }, { name: "Carlos Bautista", score: 58 }, { name: "Ana Cruz", score: 88 }, { name: "Elena Villanueva", score: 91 }].map(p => (
-                <div key={p.name} className="flex items-center gap-3">
-                  <span className="text-xs text-foreground w-36 truncate">{p.name}</span>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Individual Scores</h3>
+              <span className="text-[11px] font-mono text-muted-foreground">{individualScoresList.length} Participants Evaluated</span>
+            </div>
+            <div className="space-y-2.5 max-h-[260px] overflow-y-auto pr-1">
+              {individualScoresList.map(p => (
+                <div
+                  key={p.name}
+                  onClick={() => {
+                    handleSelectParticipant(p.name);
+                    setTab("assessor");
+                  }}
+                  className="flex items-center gap-3 p-1 rounded hover:bg-secondary/40 transition-colors cursor-pointer group"
+                  title={`Click to view or update evaluation in Assessor Dashboard for ${p.name}`}
+                >
+                  <span className="text-xs text-foreground w-36 truncate group-hover:text-primary transition-colors">{p.name}</span>
                   <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full ${p.score >= 80 ? "bg-green-400" : p.score >= 65 ? "bg-primary" : "bg-red-400"}`} style={{ width: `${p.score}%` }} />
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${p.score >= 80 ? "bg-green-400" : p.score >= 65 ? "bg-primary" : "bg-red-400"}`}
+                      style={{ width: `${p.score}%` }}
+                    />
                   </div>
-                  <span className={`text-xs font-mono font-bold w-8 text-right ${p.score >= 80 ? "text-green-400" : p.score >= 65 ? "text-primary" : "text-red-400"}`}>{p.score}</span>
+                  <span className={`text-xs font-mono font-bold w-8 text-right ${p.score >= 80 ? "text-green-400" : p.score >= 65 ? "text-primary" : "text-red-400"}`}>
+                    {p.score}
+                  </span>
                 </div>
               ))}
             </div>
@@ -5125,35 +7653,116 @@ export function EvalModule() {
         <div className="space-y-4">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             <div className="bg-card border border-border rounded-lg p-5 space-y-4">
-              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Quick Score Entry</h3>
-              <select value={assessParticipant} onChange={e => setAssessParticipant(e.target.value)} className="w-full bg-input-background border border-border rounded-md px-2 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
-                {ASSESSOR_PARTICIPANTS.map(name => <option key={name} value={name}>{name}</option>)}
+              <div className="flex items-center justify-between">
+                <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Quick Score Entry</h3>
+                {assessParticipant && (
+                  <span className="text-[11px] font-mono text-muted-foreground">
+                    Participant Status: <strong className="text-foreground">Active</strong>
+                  </span>
+                )}
+              </div>
+              <select
+                value={assessParticipant}
+                onChange={e => handleSelectParticipant(e.target.value)}
+                className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer font-medium"
+              >
+                {assessorParticipantOptions.map(name => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
               </select>
               <div className="grid grid-cols-2 gap-3">
                 {SCORE_CATEGORIES.map(c => (
                   <div key={c}>
                     <label className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest block mb-1">{c}</label>
-                    <input type="number" min="0" max="100" value={assessScores[c]} onChange={e => setAssessScores(prev => ({ ...prev, [c]: Math.max(0, Math.min(100, Number(e.target.value) || 0)) }))} className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={assessScores[c] ?? 0}
+                      onChange={e => setAssessScores(prev => ({
+                        ...prev,
+                        [c]: Math.max(0, Math.min(100, Number(e.target.value) || 0))
+                      }))}
+                      className="w-full bg-input-background border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                    />
                   </div>
                 ))}
               </div>
-              <textarea rows={3} value={assessNotes} onChange={e => setAssessNotes(e.target.value)} placeholder="Field observations..." className="w-full bg-input-background border border-border rounded-md px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none" />
+              <textarea
+                rows={3}
+                value={assessNotes}
+                onChange={e => setAssessNotes(e.target.value)}
+                placeholder="Field observations..."
+                className="w-full bg-input-background border border-border rounded-md px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              />
               <div className="flex items-center justify-between">
-                <span className="text-[12px] font-mono text-muted-foreground">Overall: <span className={`font-bold ${overallScore >= 80 ? "text-green-400" : overallScore >= 65 ? "text-primary" : "text-red-400"}`}>{overallScore}%</span></span>
-                <button onClick={handleSubmitScore} disabled={!assessParticipant} className={`flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 ${justSubmitted ? "bg-green-500/90 text-white" : "bg-primary text-primary-foreground hover:bg-primary/90"}`}>{justSubmitted ? "Submitted" : "Submit"}</button>
+                <span className="text-[12px] font-mono text-muted-foreground">
+                  Overall: <span className={`font-bold text-sm ${overallScore >= 80 ? "text-green-400" : overallScore >= 65 ? "text-primary" : "text-red-400"}`}>{overallScore}%</span>
+                </span>
+                <button
+                  onClick={handleSubmitScore}
+                  disabled={!assessParticipant}
+                  className={`flex items-center justify-center gap-2 px-5 py-2 rounded-md text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50 ${justSubmitted ? "bg-green-500 text-white" : "bg-primary text-primary-foreground hover:bg-primary/90"
+                    }`}
+                >
+                  {justSubmitted ? "Submitted" : "Submit"}
+                </button>
               </div>
             </div>
+
             <div className="bg-card border border-border rounded-lg p-5 space-y-3">
-              <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Submissions</h3>
-              {submissions.map((s, i) => (
-                <div key={i} className="p-2.5 rounded-md bg-secondary/60">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-foreground">{s.name}</span>
-                    <span className={`text-xs font-bold font-mono ${s.score >= 80 ? "text-green-400" : "text-primary"}`}>{s.score}</span>
-                  </div>
-                  <p className="text-[12px] text-muted-foreground mt-0.5">{s.note}</p>
+              <div className="flex items-center justify-between">
+                <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Recent Submissions</h3>
+                <span className="text-[11px] font-mono text-muted-foreground">{submissions.length} Recorded</span>
+              </div>
+              {submissions.length === 0 ? (
+                <div className="text-xs text-muted-foreground py-8 text-center">
+                  No evaluation submissions yet. Select a participant and submit a score.
                 </div>
-              ))}
+              ) : (
+                <div className="space-y-2.5 max-h-[330px] overflow-y-auto pr-1">
+                  {submissions.map((s, i) => (
+                    <div
+                      key={s.id || `${s.name}-${i}`}
+                      className="p-3 rounded-md bg-secondary/60 hover:bg-secondary/80 transition-colors group relative border border-transparent hover:border-border"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span
+                          onClick={() => handleSelectParticipant(s.name)}
+                          className="text-xs font-semibold text-foreground cursor-pointer hover:text-primary transition-colors"
+                          title="Click to load into Quick Score Entry"
+                        >
+                          {s.name}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold font-mono px-1.5 py-0.5 rounded ${s.score >= 80 ? "text-green-400 bg-green-500/10" : s.score >= 65 ? "text-primary bg-primary/10" : "text-red-400 bg-red-500/10"}`}>
+                            {s.score}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteSubmission(s.name);
+                            }}
+                            className="text-muted-foreground hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="Delete this submission"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                      <p className="text-[12px] text-muted-foreground mt-1 leading-relaxed">{s.note}</p>
+                      {s.scores && (
+                        <div className="flex items-center gap-2 mt-2 pt-1.5 border-t border-border/40 text-[10px] font-mono text-muted-foreground">
+                          <span>CMD: <strong className="text-foreground">{s.scores.Command ?? "—"}</strong></span>
+                          <span>PROT: <strong className="text-foreground">{s.scores.Protocols ?? "—"}</strong></span>
+                          <span>RESP: <strong className="text-foreground">{s.scores["Response Speed"] ?? "—"}</strong></span>
+                          <span>COORD: <strong className="text-foreground">{s.scores.Coordination ?? "—"}</strong></span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
@@ -5221,28 +7830,338 @@ export function EvalModule() {
   );
 }
 
-function ReportModule() {
+type DrillReportMeta = {
+  id: string;
+  title: string;
+  date: string;
+  location: string;
+  status: "Completed" | "In Progress" | "Scheduled";
+  programMatch: string;
+  baseParticipants: number;
+};
+
+const DRILL_REPORTS_LIST: DrillReportMeta[] = [
+  { id: "RPT-2026-018", title: "Earthquake Response — Advanced", date: "Jun 28, 2026", location: "District 4 EOC", status: "Completed", programMatch: "Earthquake", baseParticipants: 42 },
+  { id: "RPT-2026-019", title: "Fire Safety & Evacuation Drill", date: "Jul 03, 2026", location: "Barangay Hall Complex", status: "Completed", programMatch: "Fire", baseParticipants: 35 },
+  { id: "RPT-2026-020", title: "Flood Evacuation Protocol", date: "Jul 10, 2026", location: "District Riverfront", status: "Completed", programMatch: "Flood", baseParticipants: 28 },
+  { id: "RPT-2026-021", title: "Hazmat Incident Level 2", date: "Jul 17, 2026", location: "Industrial Sector B", status: "Completed", programMatch: "Hazmat", baseParticipants: 22 },
+];
+
+type ComplianceStandard = {
+  id: string;
+  name: string;
+  matchKey: string;
+  baseScore: number;
+  target: number;
+};
+
+const INITIAL_COMPLIANCE: ComplianceStandard[] = [
+  { id: "C1", name: "Fire Safety", matchKey: "Fire", baseScore: 94, target: 90 },
+  { id: "C2", name: "Earthquake Protocol", matchKey: "Earthquake", baseScore: 82, target: 85 },
+  { id: "C3", name: "Flood Evacuation", matchKey: "Flood", baseScore: 91, target: 90 },
+  { id: "C4", name: "Hazmat Response", matchKey: "Hazmat", baseScore: 88, target: 85 },
+  { id: "C5", name: "Mass Casualty", matchKey: "Mass Casualty", baseScore: 79, target: 80 },
+  { id: "C6", name: "Communications", matchKey: "Comms", baseScore: 96, target: 90 },
+];
+
+type TrendRecord = {
+  drill: string;
+  avgScore: number;
+  passRate: number;
+  respTime: number;
+  date?: string;
+};
+
+const BASE_TRENDS: TrendRecord[] = [
+  { drill: "D1", avgScore: 61, passRate: 58, respTime: 8.2 },
+  { drill: "D2", avgScore: 67, passRate: 64, respTime: 7.5 },
+  { drill: "D3", avgScore: 72, passRate: 70, respTime: 6.8 },
+  { drill: "D4", avgScore: 69, passRate: 66, respTime: 7.1 },
+  { drill: "D5", avgScore: 78, passRate: 75, respTime: 5.9 },
+  { drill: "D6", avgScore: 82, passRate: 81, respTime: 5.2 },
+];
+
+function ReportModule({ auth }: { auth?: AuthUser }) {
   const app = useApp();
   const [tab, setTab] = useState<ReportTab>("aar");
   const [showExportModal, setShowExportModal] = useState(false);
-  const compliance = [
-    { name: "Fire Safety", score: 94, target: 90, status: "Passed" }, { name: "Earthquake Protocol", score: 82, target: 85, status: "Failed" },
-    { name: "Flood Evacuation", score: 91, target: 90, status: "Passed" }, { name: "Hazmat Response", score: 88, target: 85, status: "Passed" },
-    { name: "Mass Casualty", score: 79, target: 80, status: "Failed" }, { name: "Communications", score: 96, target: 90, status: "Passed" },
-  ];
-  const aarStrengths = ["Rapid medical deployment — triage in 4:31 (target: 5 min)", "Communications protocols maintained throughout all phases", "Gas valve shutoff avg 1:52 across all teams"];
-  const aarGaps = ["Evacuation signage inadequate in Sector C — avg time 6:12 vs 5:00 target", "Accountability check missed by 4 teams within 10-minute limit", "Equipment cache access delayed 3–5 min by procedural bottleneck"];
-  const aarRecs = [{ p: "Critical", t: "Update Sector C maps and install additional signage" }, { p: "High", t: "Streamline cache retrieval — pre-position equipment" }, { p: "Medium", t: "ICS refresher for 4 newly assigned team leads" }];
 
-  const aarRow = [{ reportId: "RPT-2026-018", title: "Earthquake Response — Advanced", date: "Jun 28, 2026", location: "District 4 EOC", participants: 42, status: "Completed", strengths: aarStrengths.join(" | "), gaps: aarGaps.join(" | "), recommendations: aarRecs.map(r => `[${r.p}] ${r.t}`).join(" | ") }];
-  const complianceRows = compliance.map(c => ({ category: c.name, score: `${c.score}%`, target: `${c.target}%`, status: c.status, margin: `${(c.score - c.target).toFixed(0)}pts` }));
-  const trendRows = trendHistory.map((t: any) => ({ drill: t.drill, avgScore: t.avgScore, passRate: t.passRate }));
+  // 1. Report Selector & AAR State
+  const [selectedReportId, setSelectedReportId] = useState<string>("RPT-2026-018");
+  const activeReport = DRILL_REPORTS_LIST.find(r => r.id === selectedReportId) || DRILL_REPORTS_LIST[0];
+
+  const currentHeadcount = useMemo(() => {
+    const matchingAttendance = app.attendanceRecords.filter(r =>
+      r.program.toLowerCase().includes(activeReport.programMatch.toLowerCase())
+    );
+    return matchingAttendance.length > 0 ? matchingAttendance.length : activeReport.baseParticipants;
+  }, [app.attendanceRecords, activeReport]);
+
+  const [aarStrengths, setAarStrengths] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem("dptss_aar_strengths");
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return {
+      "RPT-2026-018": [
+        "Rapid medical deployment — triage in 4:31 (target: 5 min)",
+        "Communications protocols maintained throughout all phases",
+        "Gas valve shutoff avg 1:52 across all teams",
+      ],
+      "RPT-2026-019": [
+        "Stairwell clearance completed under 3:20",
+        "Hydrant pressure verified in sector 1 & 2",
+        "Zero injury drills conducted successfully",
+      ],
+    };
+  });
+
+  const [aarGaps, setAarGaps] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem("dptss_aar_gaps");
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return {
+      "RPT-2026-018": [
+        "Evacuation signage inadequate in Sector C — avg time 6:12 vs 5:00 target",
+        "Accountability check missed by 4 teams within 10-minute limit",
+        "Equipment cache access delayed 3–5 min by procedural bottleneck",
+      ],
+      "RPT-2026-019": [
+        "Floor warden communication delay on level 4",
+        "Secondary fire extinguisher recharge expired in east wing",
+      ],
+    };
+  });
+
+  const [aarRecs, setAarRecs] = useState<Record<string, { p: "Critical" | "High" | "Medium"; t: string }[]>>(() => {
+    try {
+      const saved = localStorage.getItem("dptss_aar_recs");
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return {
+      "RPT-2026-018": [
+        { p: "Critical", t: "Update Sector C maps and install additional signage" },
+        { p: "High", t: "Streamline cache retrieval — pre-position equipment" },
+        { p: "Medium", t: "ICS refresher for 4 newly assigned team leads" },
+      ],
+      "RPT-2026-019": [
+        { p: "Critical", t: "Replace expired level 4 extinguishers and update inspection tag" },
+        { p: "High", t: "Conduct repeat radio drill with secondary dispatch" },
+      ],
+    };
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dptss_aar_strengths", JSON.stringify(aarStrengths));
+      localStorage.setItem("dptss_aar_gaps", JSON.stringify(aarGaps));
+      localStorage.setItem("dptss_aar_recs", JSON.stringify(aarRecs));
+    } catch (e) { }
+  }, [aarStrengths, aarGaps, aarRecs]);
+
+  // Inline forms for adding AAR elements
+  const [newStrength, setNewStrength] = useState("");
+  const [showAddStrength, setShowAddStrength] = useState(false);
+  const [newGap, setNewGap] = useState("");
+  const [showAddGap, setShowAddGap] = useState(false);
+  const [newRecText, setNewRecText] = useState("");
+  const [newRecPriority, setNewRecPriority] = useState<"Critical" | "High" | "Medium">("High");
+  const [showAddRec, setShowAddRec] = useState(false);
+
+  const handleAddStrength = () => {
+    if (!newStrength.trim()) return;
+    setAarStrengths(prev => ({
+      ...prev,
+      [activeReport.id]: [...(prev[activeReport.id] || []), newStrength.trim()],
+    }));
+    setNewStrength("");
+    setShowAddStrength(false);
+    app.showToast("Tactical strength added to after-action report.", "success", "Strength Added");
+  };
+
+  const handleDeleteStrength = (idx: number) => {
+    setAarStrengths(prev => ({
+      ...prev,
+      [activeReport.id]: (prev[activeReport.id] || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  const handleAddGap = () => {
+    if (!newGap.trim()) return;
+    setAarGaps(prev => ({
+      ...prev,
+      [activeReport.id]: [...(prev[activeReport.id] || []), newGap.trim()],
+    }));
+    setNewGap("");
+    setShowAddGap(false);
+    app.showToast("Identified gap added to after-action report.", "warning", "Gap Logged");
+  };
+
+  const handleDeleteGap = (idx: number) => {
+    setAarGaps(prev => ({
+      ...prev,
+      [activeReport.id]: (prev[activeReport.id] || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  const handleAddRec = () => {
+    if (!newRecText.trim()) return;
+    setAarRecs(prev => ({
+      ...prev,
+      [activeReport.id]: [...(prev[activeReport.id] || []), { p: newRecPriority, t: newRecText.trim() }],
+    }));
+    setNewRecText("");
+    setShowAddRec(false);
+    app.showToast(`Added ${newRecPriority} recommendation to report.`, "success", "Recommendation Saved");
+  };
+
+  const handleDeleteRec = (idx: number) => {
+    setAarRecs(prev => ({
+      ...prev,
+      [activeReport.id]: (prev[activeReport.id] || []).filter((_, i) => i !== idx),
+    }));
+  };
+
+  // 2. Compliance Analytics State & Dynamic computation
+  const [standards, setStandards] = useState<ComplianceStandard[]>(() => {
+    try {
+      const saved = localStorage.getItem("dptss_compliance_standards");
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return INITIAL_COMPLIANCE;
+  });
+
+  const [complianceFilter, setComplianceFilter] = useState<"all" | "Passed" | "Failed">("all");
+  const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dptss_compliance_standards", JSON.stringify(standards));
+    } catch (e) { }
+  }, [standards]);
+
+  const complianceComputed = useMemo(() => {
+    return standards.map(c => {
+      const matched = app.attendanceRecords.filter(r =>
+        r.program.toLowerCase().includes(c.matchKey.toLowerCase()) && typeof r.score === "number"
+      );
+
+      let computedScore = c.baseScore;
+      if (matched.length > 0) {
+        const sum = matched.reduce((acc, r) => acc + (r.score ?? 0), 0);
+        computedScore = Math.round(sum / matched.length);
+      }
+
+      const status = computedScore >= c.target ? "Passed" : "Failed";
+      return {
+        ...c,
+        score: computedScore,
+        status,
+        margin: computedScore - c.target,
+        attendeeCount: matched.length,
+      };
+    });
+  }, [standards, app.attendanceRecords]);
+
+  const filteredCompliance = complianceComputed.filter(c =>
+    complianceFilter === "all" ? true : c.status === complianceFilter
+  );
+
+  const handleUpdateTarget = (id: string, newTarget: number) => {
+    setStandards(prev => prev.map(s => s.id === id ? { ...s, target: Math.max(50, Math.min(100, newTarget)) } : s));
+    setEditingTargetId(null);
+    app.showToast("Compliance threshold target updated.", "info", "Target Modified");
+  };
+
+  // 3. Trend Analysis State & Metrics
+  const [trendHistory, setTrendHistory] = useState<TrendRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem("dptss_trend_history");
+      if (saved) return JSON.parse(saved);
+    } catch (e) { }
+    return BASE_TRENDS;
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("dptss_trend_history", JSON.stringify(trendHistory));
+    } catch (e) { }
+  }, [trendHistory]);
+
+  const [showLogDrill, setShowLogDrill] = useState(false);
+  const [newDrillName, setNewDrillName] = useState(`D${trendHistory.length + 1}`);
+  const [newDrillScore, setNewDrillScore] = useState(85);
+  const [newDrillPass, setNewDrillPass] = useState(85);
+  const [newDrillResp, setNewDrillResp] = useState(4.8);
+
+  const handleLogDrillPoint = () => {
+    if (!newDrillName.trim()) return;
+    const newPoint: TrendRecord = {
+      drill: newDrillName.trim(),
+      avgScore: Math.round(newDrillScore),
+      passRate: Math.round(newDrillPass),
+      respTime: Number(newDrillResp.toFixed(1)),
+      date: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+    };
+    setTrendHistory(prev => [...prev, newPoint]);
+    setShowLogDrill(false);
+    setNewDrillName(`D${trendHistory.length + 2}`);
+    app.showToast(`Logged trend point for drill ${newPoint.drill}.`, "success", "Drill Recorded");
+  };
+
+  const handleResetTrends = () => {
+    if (confirm("Reset historical drill trends to standard baseline (D1-D6)?")) {
+      setTrendHistory(BASE_TRENDS);
+      app.showToast("Trend history reset to baseline.", "info", "Trends Reset");
+    }
+  };
+
+  // Dynamic Trend Summary Metrics
+  const firstDrill = trendHistory[0] || { avgScore: 61, passRate: 58, respTime: 8.2 };
+  const latestDrill = trendHistory[trendHistory.length - 1] || { avgScore: 82, passRate: 81, respTime: 5.2 };
+  const scoreGain = latestDrill.avgScore - firstDrill.avgScore;
+  const passGain = latestDrill.passRate - firstDrill.passRate;
+  const respTimeDelta = (firstDrill.respTime - latestDrill.respTime);
+
+  // 4. Export Configurations
+  const currentStrengths = aarStrengths[activeReport.id] || [];
+  const currentGaps = aarGaps[activeReport.id] || [];
+  const currentRecommendations = aarRecs[activeReport.id] || [];
+
+  const aarRows = [{
+    reportId: activeReport.id,
+    title: activeReport.title,
+    date: activeReport.date,
+    location: activeReport.location,
+    participants: currentHeadcount,
+    status: activeReport.status,
+    strengths: currentStrengths.join(" | "),
+    gaps: currentGaps.join(" | "),
+    recommendations: currentRecommendations.map(r => `[${r.p}] ${r.t}`).join(" | "),
+  }];
+
+  const complianceExportRows = complianceComputed.map(c => ({
+    category: c.name,
+    score: `${c.score}%`,
+    target: `${c.target}%`,
+    status: c.status,
+    margin: `${c.margin >= 0 ? "+" : ""}${c.margin}pts`,
+    evaluations: c.attendeeCount,
+  }));
+
+  const trendExportRows = trendHistory.map(t => ({
+    drill: t.drill,
+    avgScore: `${t.avgScore}%`,
+    passRate: `${t.passRate}%`,
+    respTime: `${t.respTime} min`,
+  }));
 
   const exportConfig = tab === "aar"
-    ? { title: "After-Action Report", desc: "Export the full after-action report including strengths, gaps, and recommendations.", color: "text-primary", rows: aarRow, coreFields: ["reportId", "title", "date", "location", "participants", "status"] }
+    ? { title: `After-Action Report — ${activeReport.title}`, desc: "Export full after-action report including strengths, gaps, and recommendations.", color: "text-primary", rows: aarRows, coreFields: ["reportId", "title", "date", "location", "participants", "status"] }
     : tab === "compliance"
-      ? { title: "Compliance Analytics", desc: "Export compliance scores against targets for every drill category.", color: "text-green-400", rows: complianceRows, coreFields: ["category", "score", "target", "status"] }
-      : { title: "Trend Analysis", desc: "Export historical score and pass-rate trend data across drills.", color: "text-blue-400", rows: trendRows, coreFields: ["drill", "avgScore", "passRate"] };
+      ? { title: "Compliance Analytics", desc: "Export compliance scores against target thresholds across all disaster categories.", color: "text-green-400", rows: complianceExportRows, coreFields: ["category", "score", "target", "status", "margin"] }
+      : { title: "Trend Analysis", desc: "Export historical progression data across disaster drills.", color: "text-blue-400", rows: trendExportRows, coreFields: ["drill", "avgScore", "passRate", "respTime"] };
 
   return (
     <div className="space-y-5">
@@ -5253,7 +8172,7 @@ function ReportModule() {
           color={exportConfig.color}
           rows={exportConfig.rows}
           coreFields={exportConfig.coreFields}
-          filename={`dptss-${tab}-report-${new Date().toISOString().slice(0, 10)}`}
+          filename={`dptss-${tab}-${selectedReportId.toLowerCase()}-${new Date().toISOString().slice(0, 10)}`}
           onExported={(format) => {
             app.addNotification({ type: "Export", subject: `Exported ${exportConfig.title} (${format.toUpperCase()})`, status: "Sent" });
             setShowExportModal(false);
@@ -5261,30 +8180,466 @@ function ReportModule() {
           onCancel={() => setShowExportModal(false)}
         />
       )}
-      <div className="flex items-center justify-between">
-        <div><h1 className="text-2xl font-bold font-display tracking-wide text-foreground">DISASTER DRILL REPORTING</h1><p className="text-muted-foreground text-sm mt-0.5">After-action reports · compliance · trend analysis</p></div>
-        <button onClick={() => setShowExportModal(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90"><Download size={16} />Export</button>
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">DISASTER DRILL REPORTING</h1>
+          <p className="text-muted-foreground text-sm mt-0.5">After-action reports · compliance · trend analysis</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {tab === "aar" && (
+            <select
+              value={selectedReportId}
+              onChange={e => setSelectedReportId(e.target.value)}
+              className="bg-secondary/70 border border-border rounded-md px-3 py-2 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+            >
+              {DRILL_REPORTS_LIST.map(r => (
+                <option key={r.id} value={r.id}>{r.id} — {r.title}</option>
+              ))}
+            </select>
+          )}
+          <button
+            onClick={() => setShowExportModal(true)}
+            className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90 transition-colors cursor-pointer shadow-sm"
+          >
+            <Download size={16} />
+            <span>Export</span>
+          </button>
+        </div>
       </div>
-      <TabBar tabs={[{ id: "aar", label: "After-Action Report", icon: FileCheck }, { id: "compliance", label: "Compliance Analytics", icon: Shield }, { id: "trends", label: "Trend Analysis", icon: Trend }]} active={tab} onChange={v => setTab(v as ReportTab)} />
+
+      <TabBar
+        tabs={[
+          { id: "aar", label: "After-Action Report", icon: FileCheck },
+          { id: "compliance", label: "Compliance Analytics", icon: Shield },
+          { id: "trends", label: "Trend Analysis", icon: Trend }
+        ]}
+        active={tab}
+        onChange={v => setTab(v as ReportTab)}
+      />
+
+      {/* TAB 1: After-Action Report (AAR) */}
       {tab === "aar" && (
         <div className="bg-card border border-border rounded-lg p-5 space-y-4">
-          <div><div className="flex items-center gap-2 mb-1"><span className="text-[12px] font-mono text-muted-foreground">RPT-2026-018</span><Badge status="Completed">Completed</Badge></div><h2 className="text-lg font-bold font-display text-foreground">Earthquake Response — Advanced</h2><div className="flex gap-4 mt-1 text-xs font-mono text-muted-foreground"><span>Jun 28, 2026</span><span>·</span><span>District 4 EOC</span><span>·</span><span>42 participants</span></div></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><div className="text-[12px] font-mono text-green-400 uppercase tracking-widest mb-2">Strengths</div><div className="space-y-1.5">{["Rapid medical deployment — triage in 4:31 (target: 5 min)", "Communications protocols maintained throughout all phases", "Gas valve shutoff avg 1:52 across all teams"].map((s, i) => (<div key={i} className="flex items-start gap-2 p-2 rounded bg-green-500/5 border border-green-500/10"><span className="w-1 h-1 rounded-full bg-green-400 mt-1.5 flex-shrink-0" /><span className="text-xs text-muted-foreground">{s}</span></div>))}</div></div>
-            <div><div className="text-[12px] font-mono text-red-400 uppercase tracking-widest mb-2">Gaps & Failures</div><div className="space-y-1.5">{["Evacuation signage inadequate in Sector C — avg time 6:12 vs 5:00 target", "Accountability check missed by 4 teams within 10-minute limit", "Equipment cache access delayed 3–5 min by procedural bottleneck"].map((g, i) => (<div key={i} className="flex items-start gap-2 p-2 rounded bg-red-500/5 border border-red-500/10"><span className="w-1 h-1 rounded-full bg-red-400 mt-1.5 flex-shrink-0" /><span className="text-xs text-muted-foreground">{g}</span></div>))}</div></div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[12px] font-mono font-semibold text-primary px-1.5 py-0.5 rounded bg-primary/10 border border-primary/20">{activeReport.id}</span>
+                <Badge status={activeReport.status}>{activeReport.status}</Badge>
+              </div>
+              <h2 className="text-lg font-bold font-display text-foreground">{activeReport.title}</h2>
+              <div className="flex flex-wrap items-center gap-3 mt-1 text-xs font-mono text-muted-foreground">
+                <span className="flex items-center gap-1"><Calendar size={12} /> {activeReport.date}</span>
+                <span>·</span>
+                <span className="flex items-center gap-1"><MapPin size={12} /> {activeReport.location}</span>
+                <span>·</span>
+                <span className="flex items-center gap-1 text-foreground font-semibold"><Users size={12} className="text-primary" /> {currentHeadcount} participants</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-mono text-muted-foreground">Active Operational Report</span>
+            </div>
           </div>
-          <div><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-2">Recommendations</div><div className="space-y-1.5">{[{ p: "Critical", t: "Update Sector C maps and install additional signage" }, { p: "High", t: "Streamline cache retrieval — pre-position equipment" }, { p: "Medium", t: "ICS refresher for 4 newly assigned team leads" }].map((r, i) => (<div key={i} className="flex items-start gap-2 p-2 rounded bg-secondary/50"><Badge status={r.p}>{r.p}</Badge><span className="text-xs text-muted-foreground">{r.t}</span></div>))}</div></div>
+
+          {/* Grid: Strengths & Gaps */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Strengths */}
+            <div className="bg-secondary/20 border border-green-500/20 rounded-lg p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[12px] font-mono text-green-400 uppercase tracking-widest font-semibold flex items-center gap-1.5">
+                  <CheckCircle size={14} /> Strengths ({currentStrengths.length})
+                </div>
+                <button
+                  onClick={() => setShowAddStrength(true)}
+                  className="text-[11px] font-mono text-green-400 hover:text-green-300 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Plus size={12} /> Add
+                </button>
+              </div>
+
+              {showAddStrength && (
+                <div className="p-2.5 rounded bg-card border border-green-500/30 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Enter identified tactical strength..."
+                    value={newStrength}
+                    onChange={e => setNewStrength(e.target.value)}
+                    className="w-full bg-input-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-green-400"
+                    onKeyDown={e => e.key === "Enter" && handleAddStrength()}
+                    autoFocus
+                  />
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button onClick={() => setShowAddStrength(false)} className="text-[11px] px-2 py-0.5 rounded text-muted-foreground hover:bg-secondary">Cancel</button>
+                    <button onClick={handleAddStrength} className="text-[11px] px-2.5 py-0.5 rounded bg-green-600 hover:bg-green-700 text-white font-medium">Save</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                {currentStrengths.length === 0 ? (
+                  <div className="text-xs text-muted-foreground italic py-3 text-center">No strengths recorded yet.</div>
+                ) : (
+                  currentStrengths.map((s, i) => (
+                    <div key={i} className="flex items-start justify-between gap-2 p-2 rounded bg-green-500/5 border border-green-500/10 group">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-green-400 mt-1.5 flex-shrink-0" />
+                        <span className="text-xs text-foreground/90 leading-relaxed">{s}</span>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteStrength(i)}
+                        className="text-muted-foreground hover:text-red-400 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                        title="Delete strength"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Gaps & Failures */}
+            <div className="bg-secondary/20 border border-red-500/20 rounded-lg p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[12px] font-mono text-red-400 uppercase tracking-widest font-semibold flex items-center gap-1.5">
+                  <AlertTriangle size={14} /> Gaps &amp; Failures ({currentGaps.length})
+                </div>
+                <button
+                  onClick={() => setShowAddGap(true)}
+                  className="text-[11px] font-mono text-red-400 hover:text-red-300 flex items-center gap-1 transition-colors cursor-pointer"
+                >
+                  <Plus size={12} /> Add
+                </button>
+              </div>
+
+              {showAddGap && (
+                <div className="p-2.5 rounded bg-card border border-red-500/30 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Enter procedural bottleneck or failure..."
+                    value={newGap}
+                    onChange={e => setNewGap(e.target.value)}
+                    className="w-full bg-input-background border border-border rounded px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-red-400"
+                    onKeyDown={e => e.key === "Enter" && handleAddGap()}
+                    autoFocus
+                  />
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button onClick={() => setShowAddGap(false)} className="text-[11px] px-2 py-0.5 rounded text-muted-foreground hover:bg-secondary">Cancel</button>
+                    <button onClick={handleAddGap} className="text-[11px] px-2.5 py-0.5 rounded bg-red-600 hover:bg-red-700 text-white font-medium">Save</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-1.5 max-h-[220px] overflow-y-auto pr-1">
+                {currentGaps.length === 0 ? (
+                  <div className="text-xs text-muted-foreground italic py-3 text-center">No gaps or failures recorded.</div>
+                ) : (
+                  currentGaps.map((g, i) => (
+                    <div key={i} className="flex items-start justify-between gap-2 p-2 rounded bg-red-500/5 border border-red-500/10 group">
+                      <div className="flex items-start gap-2 min-w-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 flex-shrink-0" />
+                        <span className="text-xs text-foreground/90 leading-relaxed">{g}</span>
+                      </div>
+                      <button
+                        onClick={() => handleDeleteGap(i)}
+                        className="text-muted-foreground hover:text-red-400 p-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                        title="Delete gap"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Recommendations */}
+          <div className="border-t border-border/60 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest font-semibold">
+                Actionable Recommendations ({currentRecommendations.length})
+              </div>
+              <button
+                onClick={() => setShowAddRec(true)}
+                className="text-[11px] font-mono text-primary hover:text-primary/80 flex items-center gap-1 transition-colors cursor-pointer"
+              >
+                <Plus size={12} /> Add Recommendation
+              </button>
+            </div>
+
+            {showAddRec && (
+              <div className="p-3 rounded-lg bg-card border border-border mb-3 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono text-muted-foreground">Priority:</span>
+                  {(["Critical", "High", "Medium"] as const).map(p => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setNewRecPriority(p)}
+                      className={`text-xs px-2 py-0.5 rounded transition-colors ${newRecPriority === p ? "bg-primary text-primary-foreground font-bold" : "bg-secondary text-muted-foreground"}`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  type="text"
+                  placeholder="Enter concrete recommendation..."
+                  value={newRecText}
+                  onChange={e => setNewRecText(e.target.value)}
+                  className="w-full bg-input-background border border-border rounded px-2.5 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onKeyDown={e => e.key === "Enter" && handleAddRec()}
+                  autoFocus
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setShowAddRec(false)} className="text-xs px-2.5 py-1 rounded text-muted-foreground hover:bg-secondary">Cancel</button>
+                  <button onClick={handleAddRec} className="text-xs px-3 py-1 rounded bg-primary text-primary-foreground font-semibold">Save Recommendation</button>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              {currentRecommendations.length === 0 ? (
+                <div className="text-xs text-muted-foreground italic py-3 text-center">No recommendations added.</div>
+              ) : (
+                currentRecommendations.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 p-2 rounded bg-secondary/50 hover:bg-secondary/70 transition-colors group">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Badge status={r.p}>{r.p}</Badge>
+                      <span className="text-xs text-foreground truncate">{r.t}</span>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteRec(i)}
+                      className="text-muted-foreground hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      title="Delete recommendation"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </div>
       )}
+
+      {/* TAB 2: Compliance Analytics */}
       {tab === "compliance" && (
-        <div className="space-y-3">{compliance.map(c => (<div key={c.name} className="flex items-center gap-4 p-3 rounded-lg bg-card border border-border"><span className="text-xs text-foreground w-36">{c.name}</span><div className="flex-1 relative h-6 bg-secondary rounded"><div className={`h-full rounded ${c.score >= c.target ? "bg-green-500/30" : "bg-red-500/20"}`} style={{ width: `${c.score}%` }} /><div className="absolute top-0 bottom-0 border-l-2 border-dashed border-yellow-400/60" style={{ left: `${c.target}%` }} /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-[12px] font-mono font-bold text-foreground">{c.score}%</span></div><span className="text-[12px] font-mono text-muted-foreground w-16">min {c.target}%</span><Badge status={c.status}>{c.status}</Badge></div>))}</div>
+        <div className="space-y-4">
+          {/* Controls Bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-card border border-border rounded-lg">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-mono text-muted-foreground uppercase">Filter Status:</span>
+              {(["all", "Passed", "Failed"] as const).map(f => {
+                const count = f === "all" ? complianceComputed.length : complianceComputed.filter(c => c.status === f).length;
+                return (
+                  <button
+                    key={f}
+                    onClick={() => setComplianceFilter(f)}
+                    className={`text-xs px-2.5 py-1 rounded transition-colors font-medium ${complianceFilter === f ? "bg-primary text-primary-foreground font-bold" : "bg-secondary text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {f === "all" ? `All (${count})` : `${f} (${count})`}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="text-xs font-mono text-muted-foreground">
+              Dynamic compliance calculation based on evaluated drill participants
+            </div>
+          </div>
+
+          {/* Compliance Rows List */}
+          <div className="space-y-3">
+            {filteredCompliance.map(c => {
+              const isPassed = c.score >= c.target;
+              return (
+                <div key={c.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-3.5 rounded-lg bg-card border border-border transition-colors hover:border-border/80">
+                  <div className="w-36 flex-shrink-0">
+                    <span className="text-xs font-bold text-foreground block">{c.name}</span>
+                    {c.attendeeCount > 0 ? (
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {c.attendeeCount} live record{c.attendeeCount === 1 ? "" : "s"}
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono text-muted-foreground">SOP standard</span>
+                    )}
+                  </div>
+
+                  {/* Progress Bar with Target Line */}
+                  <div className="flex-1 relative h-6 bg-secondary rounded overflow-hidden">
+                    <div
+                      className={`h-full rounded transition-all duration-500 ${isPassed ? "bg-green-500/30" : "bg-red-500/20"}`}
+                      style={{ width: `${Math.min(100, c.score)}%` }}
+                    />
+
+                    {/* Dashed Target Line */}
+                    <div
+                      className="absolute top-0 bottom-0 border-l-2 border-dashed border-yellow-400/80 pointer-events-none"
+                      style={{ left: `${c.target}%` }}
+                      title={`Target threshold: ${c.target}%`}
+                    />
+
+                    {/* Score inside bar */}
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[12px] font-mono font-bold text-foreground drop-shadow">
+                      {c.score}%
+                    </span>
+                  </div>
+
+                  {/* Target & Adjuster */}
+                  <div className="flex items-center justify-between sm:justify-end gap-3 flex-shrink-0">
+                    {editingTargetId === c.id ? (
+                      <div className="flex items-center gap-1">
+                        <span className="text-[11px] font-mono text-muted-foreground">min</span>
+                        <input
+                          type="number"
+                          min={50}
+                          max={100}
+                          defaultValue={c.target}
+                          onBlur={e => handleUpdateTarget(c.id, Number(e.target.value) || c.target)}
+                          onKeyDown={e => e.key === "Enter" && handleUpdateTarget(c.id, Number(e.currentTarget.value) || c.target)}
+                          className="w-14 bg-input-background border border-primary rounded px-1 py-0.5 text-xs text-foreground font-mono"
+                          autoFocus
+                        />
+                        <span className="text-[11px] font-mono text-muted-foreground">%</span>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingTargetId(c.id)}
+                        className="text-[12px] font-mono text-muted-foreground hover:text-primary transition-colors cursor-pointer w-20 text-left"
+                        title="Click to adjust minimum target %"
+                      >
+                        min <strong className="text-foreground">{c.target}%</strong> ✎
+                      </button>
+                    )}
+
+                    <Badge status={c.status}>{c.status}</Badge>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
+
+      {/* TAB 3: Trend Analysis */}
       {tab === "trends" && (
         <div className="space-y-4">
-          <div className="grid grid-cols-3 gap-3">{[{ label: "Score Improvement", value: "+21pts", color: "text-green-400" }, { label: "Pass Rate Growth", value: "+23%", color: "text-primary" }, { label: "Response Time Δ", value: "−3.0 min", color: "text-blue-400" }].map(s => (<div key={s.label} className="bg-card border border-border rounded-lg p-4"><div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">{s.label}</div><div className={`text-2xl font-bold font-display ${s.color}`}>{s.value}</div></div>))}</div>
+          {/* 3 Metric Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-card border border-border rounded-lg p-4">
+              <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">SCORE IMPROVEMENT</div>
+              <div className={`text-2xl font-bold font-display ${scoreGain >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {scoreGain >= 0 ? `+${scoreGain}` : scoreGain}pts
+              </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-lg p-4">
+              <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">PASS RATE GROWTH</div>
+              <div className={`text-2xl font-bold font-display ${passGain >= 0 ? "text-primary" : "text-red-400"}`}>
+                {passGain >= 0 ? `+${passGain}` : passGain}%
+              </div>
+            </div>
+
+            <div className="bg-card border border-border rounded-lg p-4">
+              <div className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-1">RESPONSE TIME Δ</div>
+              <div className={`text-2xl font-bold font-display ${respTimeDelta >= 0 ? "text-blue-400" : "text-amber-400"}`}>
+                {respTimeDelta >= 0 ? `−${respTimeDelta.toFixed(1)}` : `+${Math.abs(respTimeDelta).toFixed(1)}`} min
+              </div>
+            </div>
+          </div>
+
+          {/* Area Chart Card */}
           <div className="bg-card border border-border rounded-lg p-5">
-            <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest mb-4">Score & Pass Rate Trends</h3>
-            <ResponsiveContainer width="100%" height={200}><AreaChart data={trendHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}><defs><linearGradient id="rpt-score-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f0a500" stopOpacity={0.2} /><stop offset="95%" stopColor="#f0a500" stopOpacity={0} /></linearGradient><linearGradient id="rpt-pass-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#3fb950" stopOpacity={0.2} /><stop offset="95%" stopColor="#3fb950" stopOpacity={0} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" /><XAxis dataKey="drill" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} /><YAxis domain={[50, 100]} tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} /><Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11 }} /><Area key="area-rpt-score" type="monotone" dataKey="avgScore" name="Avg Score" stroke="#f0a500" fill="url(#rpt-score-grad)" strokeWidth={2} dot={{ fill: "#f0a500", r: 3 }} /><Area key="area-rpt-pass" type="monotone" dataKey="passRate" name="Pass Rate" stroke="#3fb950" fill="url(#rpt-pass-grad)" strokeWidth={2} dot={{ fill: "#3fb950", r: 3 }} /></AreaChart></ResponsiveContainer>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+              <div>
+                <h3 className="text-[12px] font-mono text-muted-foreground uppercase tracking-widest">Score &amp; Pass Rate Trends</h3>
+                <p className="text-xs text-muted-foreground mt-0.5">Tracking unit progression across drills ({trendHistory[0]?.drill} through {trendHistory[trendHistory.length - 1]?.drill}).</p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 text-[11px] font-mono">
+                  <span className="flex items-center gap-1.5 text-foreground">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#f0a500]" />
+                    Avg Score
+                  </span>
+                  <span className="flex items-center gap-1.5 text-foreground">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#3fb950]" />
+                    Pass Rate
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setShowLogDrill(true)}
+                  className="flex items-center gap-1 text-xs px-2.5 py-1 rounded bg-secondary hover:bg-secondary/80 text-foreground transition-colors font-medium cursor-pointer"
+                >
+                  <Plus size={12} /> Log Drill
+                </button>
+              </div>
+            </div>
+
+            {showLogDrill && (
+              <div className="mb-4 p-3 rounded-lg bg-secondary/40 border border-border space-y-3">
+                <div className="text-xs font-bold text-foreground">Record Completed Drill Data Point</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase block mb-1">Drill ID</label>
+                    <input type="text" value={newDrillName} onChange={e => setNewDrillName(e.target.value)} className="w-full bg-input-background border border-border rounded px-2 py-1 text-foreground" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase block mb-1">Avg Score (%)</label>
+                    <input type="number" min="0" max="100" value={newDrillScore} onChange={e => setNewDrillScore(Number(e.target.value))} className="w-full bg-input-background border border-border rounded px-2 py-1 text-foreground" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase block mb-1">Pass Rate (%)</label>
+                    <input type="number" min="0" max="100" value={newDrillPass} onChange={e => setNewDrillPass(Number(e.target.value))} className="w-full bg-input-background border border-border rounded px-2 py-1 text-foreground" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-mono text-muted-foreground uppercase block mb-1">Response Time (min)</label>
+                    <input type="number" step="0.1" value={newDrillResp} onChange={e => setNewDrillResp(Number(e.target.value))} className="w-full bg-input-background border border-border rounded px-2 py-1 text-foreground" />
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-2">
+                  <button onClick={() => setShowLogDrill(false)} className="text-xs px-2.5 py-1 rounded text-muted-foreground hover:bg-secondary">Cancel</button>
+                  <button onClick={handleLogDrillPoint} className="text-xs px-3 py-1 rounded bg-primary text-primary-foreground font-semibold">Save Data Point</button>
+                </div>
+              </div>
+            )}
+
+            <ResponsiveContainer width="100%" height={210}>
+              <AreaChart data={trendHistory} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="rpt-score-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#f0a500" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#f0a500" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="rpt-pass-grad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#3fb950" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#3fb950" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(240,246,252,0.06)" />
+                <XAxis dataKey="drill" tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+                <YAxis domain={[50, 100]} tick={{ fill: "#8b949e", fontSize: 10, fontFamily: "JetBrains Mono" }} axisLine={false} tickLine={false} />
+                <Tooltip contentStyle={{ background: "#1c2128", border: "1px solid rgba(240,246,252,0.1)", borderRadius: 6, fontSize: 11, fontFamily: "JetBrains Mono" }} />
+                <Area key="area-rpt-score" type="monotone" dataKey="avgScore" name="Avg Score" stroke="#f0a500" fill="url(#rpt-score-grad)" strokeWidth={2} dot={{ fill: "#f0a500", r: 3 }} />
+                <Area key="area-rpt-pass" type="monotone" dataKey="passRate" name="Pass Rate" stroke="#3fb950" fill="url(#rpt-pass-grad)" strokeWidth={2} dot={{ fill: "#3fb950", r: 3 }} />
+              </AreaChart>
+            </ResponsiveContainer>
+
+            {trendHistory.length > BASE_TRENDS.length && (
+              <div className="mt-3 pt-2 border-t border-border/40 flex justify-end">
+                <button
+                  onClick={handleResetTrends}
+                  className="text-[11px] font-mono text-muted-foreground hover:text-red-400 transition-colors"
+                >
+                  Reset to Standard 6-Drill Baseline
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -6103,11 +9458,11 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
         <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <AnimatePresence mode="wait">
             <motion.div key={mod} variants={pageTransition} initial="hidden" animate="show" exit="exit">
-              {mod === "dashboard" && <AdminDashboard />}
+              {mod === "dashboard" && <AdminDashboard onNavigate={setMod} />}
               {mod === "training" && <TrainingModule />}
-              {mod === "simulation" && <SimModule />}
+              {mod === "simulation" && <SimModule auth={auth} />}
               {mod === "participants" && <ParticipantsModule />}
-              {mod === "evaluation" && <EvalModule />}
+              {mod === "evaluation" && <EvalModule auth={auth} />}
               {mod === "reporting" && <ReportModule />}
             </motion.div>
           </AnimatePresence>
@@ -6290,11 +9645,11 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
         <main className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
           <AnimatePresence mode="wait">
             <motion.div key={mod} variants={pageTransition} initial="hidden" animate="show" exit="exit">
-              {mod === "dashboard" && <AdminDashboard />}
+              {mod === "dashboard" && <AdminDashboard onNavigate={setMod} />}
               {mod === "training" && <TrainingModule />}
-              {mod === "simulation" && <SimModule />}
+              {mod === "simulation" && <SimModule auth={auth} />}
               {mod === "participants" && <ParticipantsModule />}
-              {mod === "evaluation" && <EvalModule />}
+              {mod === "evaluation" && <EvalModule auth={auth} />}
               {mod === "reporting" && <ReportModule />}
               {mod === "usermgmt" && <UserManagement />}
               {mod === "settings" && <SystemSettings />}
