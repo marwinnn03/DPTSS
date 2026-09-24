@@ -989,7 +989,7 @@ function ToastContainer() {
 }
 
 function SessionTimeoutHandler({ onLogout }: { onLogout: (reason?: string) => void }) {
-  const TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+  const TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
   const WARNING_MS = 60 * 1000; // Warning at 60s remaining
   const [secondsRemaining, setSecondsRemaining] = useState<number | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
@@ -1915,11 +1915,10 @@ function LoginScreen({
                         onChange={e => { setRegPassword(e.target.value); setError(""); }}
                         onKeyDown={e => e.key === "Enter" && handleRegisterSubmit()}
                         placeholder="Create a password"
-                        className={`w-full bg-[#f8f9f7] border rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white transition-all shadow-2xs pr-10 ${
-                          regPassword.length > 0 && !isPasswordValid
+                        className={`w-full bg-[#f8f9f7] border rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white transition-all shadow-2xs pr-10 ${regPassword.length > 0 && !isPasswordValid
                             ? "border-rose-400 focus:border-rose-500"
                             : "border-gray-200/90 focus:border-[#0d7d4d]"
-                        }`}
+                          }`}
                       />
                       <button
                         type="button"
@@ -1947,13 +1946,12 @@ function LoginScreen({
                           return (
                             <div
                               key={idx}
-                              className={`flex items-center gap-1.5 transition-colors duration-200 ${
-                                req.met
+                              className={`flex items-center gap-1.5 transition-colors duration-200 ${req.met
                                   ? "text-emerald-700 font-medium"
                                   : isTyped
                                     ? "text-rose-700 font-medium"
                                     : "text-gray-500"
-                              }`}
+                                }`}
                             >
                               {req.met ? (
                                 <Check size={14} className="shrink-0 stroke-[2.5] text-emerald-600" />
@@ -1983,13 +1981,12 @@ function LoginScreen({
                         onChange={e => { setRegConfirmPassword(e.target.value); setError(""); }}
                         onKeyDown={e => e.key === "Enter" && handleRegisterSubmit()}
                         placeholder="Re-enter your password"
-                        className={`w-full bg-[#f8f9f7] border rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white transition-all shadow-2xs pr-10 ${
-                          regConfirmPassword && regConfirmPassword !== regPassword
+                        className={`w-full bg-[#f8f9f7] border rounded-2xl px-3.5 py-2.5 text-xs text-gray-900 placeholder:text-gray-400 focus:outline-none focus:bg-white transition-all shadow-2xs pr-10 ${regConfirmPassword && regConfirmPassword !== regPassword
                             ? "border-rose-400 focus:border-rose-500"
                             : regConfirmPassword && regConfirmPassword === regPassword
                               ? "border-emerald-300 focus:border-emerald-600"
                               : "border-gray-200/90 focus:border-[#0d7d4d]"
-                        }`}
+                          }`}
                       />
                       <button
                         type="button"
@@ -2003,9 +2000,8 @@ function LoginScreen({
 
                     {regConfirmPassword && (
                       <div
-                        className={`text-[11px] font-medium flex items-center gap-1 mt-1 px-1 transition-colors ${
-                          regPassword === regConfirmPassword ? "text-emerald-700" : "text-rose-700"
-                        }`}
+                        className={`text-[11px] font-medium flex items-center gap-1 mt-1 px-1 transition-colors ${regPassword === regConfirmPassword ? "text-emerald-700" : "text-rose-700"
+                          }`}
                       >
                         {regPassword === regConfirmPassword ? (
                           <>
