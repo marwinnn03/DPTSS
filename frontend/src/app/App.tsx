@@ -5134,7 +5134,7 @@ function TrainingModule() {
       )}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-4xl font-bold font-display tracking-wide text-foreground">TRAINING PROGRAM MANAGEMENT</h1>
+          <h1 className="text-4xl font-bold font-display tracking-wide text-foreground">TRAINING PROGRAM MANAGEMENT MODULE</h1>
           <p className="text-muted-foreground text-base mt-0.5">Curriculum · scheduling · resource allocation</p>
         </div>
         <div className="flex items-center gap-2">
@@ -5682,7 +5682,7 @@ ${generatedStory.assignedRoles.map((r: any) => `- ${r.name}: ${r.count} personne
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-4xl font-bold font-display tracking-wide text-foreground">
-            SIMULATION SCENARIO BUILDER
+            SIMULATION SCENARIO BUILDER MODULE
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">Disaster type · variable injector · role configuration · script generator</p>
         </div>
@@ -6467,7 +6467,7 @@ function ParticipantsModule() {
         />
       )}
       <div className="flex items-center justify-between">
-        <div><h1 className="text-4xl font-bold font-display tracking-wide text-foreground">PARTICIPANT REGISTRATION</h1><p className="text-muted-foreground text-base mt-0.5">Profiles · attendance records · self-service portal · notifications</p></div>
+        <div><h1 className="text-4xl font-bold font-display tracking-wide text-foreground">PARTICIPANT REGISTRATION MODULE</h1><p className="text-muted-foreground text-base mt-0.5">Profiles · attendance records · self-service portal · notifications</p></div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowRegisterModal(true)} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-base font-semibold hover:bg-primary/90"><Plus size={16} />Register</button>
           <button onClick={() => setShowExportModal(true)} className="flex items-center gap-2 bg-secondary text-muted-foreground px-3 py-2 rounded-md text-base font-semibold hover:bg-secondary/90"><ClipboardList size={16} />Export</button>
@@ -7355,7 +7355,7 @@ export function EvalModule({ auth }: { auth?: AuthUser }) {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">PERFORMANCE EVALUATION</h1>
+          <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">PERFORMANCE EVALUATION MODULE</h1>
           <p className="text-muted-foreground text-sm mt-0.5">Objective tracking · analytics · AI evaluation engine</p>
         </div>
         <div className="text-xs font-mono text-muted-foreground bg-secondary px-3 py-2 rounded-md">Earthquake Response — Advanced · Jun 28</div>
@@ -8180,7 +8180,7 @@ function ReportModule({ auth }: { auth?: AuthUser }) {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">DISASTER DRILL REPORTING</h1>
+          <h1 className="text-2xl font-bold font-display tracking-wide text-foreground">DISASTER DRILL REPORTING MODULE</h1>
           <p className="text-muted-foreground text-sm mt-0.5">After-action reports · compliance · trend analysis</p>
         </div>
         <div className="flex items-center gap-2">
@@ -9311,17 +9311,17 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
 
   const ADMIN_NAV = [
     { id: "dashboard" as AdminModule, label: "Command Overview", icon: Activity },
-    { id: "training" as AdminModule, label: "Training Programs", icon: BookOpen },
-    { id: "simulation" as AdminModule, label: "Scenario Builder", icon: Cpu },
-    { id: "participants" as AdminModule, label: "Participants", icon: Users },
-    { id: "evaluation" as AdminModule, label: "Performance Eval", icon: BarChart3 },
-    { id: "reporting" as AdminModule, label: "Drill Reports", icon: FileText },
+    { id: "training" as AdminModule, label: "Training Program Management Module", icon: BookOpen },
+    { id: "simulation" as AdminModule, label: "Simulation Scenario Builder Module", icon: Cpu },
+    { id: "participants" as AdminModule, label: "Participant Registration Module", icon: Users },
+    { id: "evaluation" as AdminModule, label: "Performance Evaluation Module", icon: BarChart3 },
+    { id: "reporting" as AdminModule, label: "Disaster Drill Reporting Module", icon: FileText },
   ];
 
   return (
     <div className="min-h-screen bg-background text-foreground flex" style={{ fontFamily: "'DM Sans', 'Barlow', sans-serif" }}>
       {/* Desktop Persistent Sidebar */}
-      <aside className="hidden md:flex w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
+      <aside className="hidden md:flex w-72 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
         <div className="px-4 py-5 border-b border-sidebar-border">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0"><img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" /></div>
@@ -9330,7 +9330,7 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
         </div>
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
           <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-2">Modules</div>
-          {ADMIN_NAV.map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={active ? "text-primary" : "text-current"} /><span>{item.label}</span>{active && <ChevronRight size={12} className="ml-auto text-primary" />}</motion.button>); })}
+          {ADMIN_NAV.map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={`flex-shrink-0 ${active ? "text-primary" : "text-current"}`} /><span className="flex-1 leading-snug">{item.label}</span>{active && <ChevronRight size={12} className="ml-auto flex-shrink-0 text-primary" />}</motion.button>); })}
         </nav>
         <div className="px-3 pb-3">
           <div className="bg-purple-500/10 border border-purple-500/20 rounded-lg p-3">
@@ -9393,9 +9393,9 @@ function AdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => void }
                       className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
                         }`}
                     >
-                      <Icon size={16} className={active ? "text-primary" : "text-current"} />
-                      <span>{item.label}</span>
-                      {active && <ChevronRight size={14} className="ml-auto text-primary" />}
+                      <Icon size={16} className={`flex-shrink-0 ${active ? "text-primary" : "text-current"}`} />
+                      <span className="flex-1 leading-snug">{item.label}</span>
+                      {active && <ChevronRight size={14} className="ml-auto flex-shrink-0 text-primary" />}
                     </button>
                   );
                 })}
@@ -9475,11 +9475,11 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
 
   const SA_NAV = [
     { id: "dashboard" as SuperAdminModule, label: "Command Overview", icon: Activity, group: "Operations" },
-    { id: "training" as SuperAdminModule, label: "Training Programs", icon: BookOpen, group: "Operations" },
-    { id: "simulation" as SuperAdminModule, label: "Scenario Builder", icon: Cpu, group: "Operations" },
-    { id: "participants" as SuperAdminModule, label: "Participants", icon: Users, group: "Operations" },
-    { id: "evaluation" as SuperAdminModule, label: "Performance Eval", icon: BarChart3, group: "Operations" },
-    { id: "reporting" as SuperAdminModule, label: "Drill Reports", icon: FileText, group: "Operations" },
+    { id: "training" as SuperAdminModule, label: "Training Program Management Module", icon: BookOpen, group: "Operations" },
+    { id: "simulation" as SuperAdminModule, label: "Simulation Scenario Builder Module", icon: Cpu, group: "Operations" },
+    { id: "participants" as SuperAdminModule, label: "Participant Registration Module", icon: Users, group: "Operations" },
+    { id: "evaluation" as SuperAdminModule, label: "Performance Evaluation Module", icon: BarChart3, group: "Operations" },
+    { id: "reporting" as SuperAdminModule, label: "Disaster Drill Reporting Module", icon: FileText, group: "Operations" },
     { id: "usermgmt" as SuperAdminModule, label: "User Management", icon: ShieldCheck, group: "System" },
     { id: "settings" as SuperAdminModule, label: "System Settings", icon: Settings, group: "System" },
   ];
@@ -9489,7 +9489,7 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
   return (
     <div className="min-h-screen bg-background text-foreground flex" style={{ fontFamily: "'DM Sans', 'Barlow', sans-serif" }}>
       {/* Desktop Persistent Sidebar */}
-      <aside className="hidden md:flex w-64 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
+      <aside className="hidden md:flex w-72 flex-shrink-0 bg-sidebar border-r border-sidebar-border flex-col" style={{ minHeight: "100vh" }}>
         <div className="px-4 py-5 border-b border-sidebar-border">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-full overflow-hidden ring-1 ring-white/10 bg-white flex-shrink-0"><img src={BARANGAY_LOGO_IMG} alt="Barangay Culiat Seal" className="w-full h-full object-cover" /></div>
@@ -9501,7 +9501,7 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
             <div key={g}>
               <div className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest px-2 mb-1.5">{g}</div>
               <div className="space-y-0.5">
-                {SA_NAV.filter(n => n.group === g).map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? `bg-sidebar-accent text-foreground` : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={active ? "text-primary" : "text-current"} /><span>{item.label}</span>{active && <ChevronRight size={12} className="ml-auto text-primary" />}</motion.button>); })}
+                {SA_NAV.filter(n => n.group === g).map((item, i) => { const Icon = item.icon; const active = mod === item.id; return (<motion.button key={item.id} onClick={() => setMod(item.id)} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 + i * 0.05 }} whileHover={{ x: 3 }} whileTap={{ scale: 0.97 }} className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md text-left transition-colors text-xs font-medium cursor-pointer ${active ? `bg-sidebar-accent text-foreground` : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"}`}><Icon size={15} className={`flex-shrink-0 ${active ? "text-primary" : "text-current"}`} /><span className="flex-1 leading-snug">{item.label}</span>{active && <ChevronRight size={12} className="ml-auto flex-shrink-0 text-primary" />}</motion.button>); })}
               </div>
             </div>
           ))}
@@ -9570,9 +9570,9 @@ function SuperAdminShell({ auth, onLogout }: { auth: AuthUser; onLogout: () => v
                             className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left transition-colors text-xs font-semibold cursor-pointer ${active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50"
                               }`}
                           >
-                            <Icon size={16} className={active ? "text-primary" : "text-current"} />
-                            <span>{item.label}</span>
-                            {active && <ChevronRight size={14} className="ml-auto text-primary" />}
+                            <Icon size={16} className={`flex-shrink-0 ${active ? "text-primary" : "text-current"}`} />
+                            <span className="flex-1 leading-snug">{item.label}</span>
+                            {active && <ChevronRight size={14} className="ml-auto flex-shrink-0 text-primary" />}
                           </button>
                         );
                       })}
